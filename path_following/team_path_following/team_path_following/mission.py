@@ -29,8 +29,8 @@ class MissionParams:
     arrive_tol: float = 0.20       # m at the goal before landing
     finish_wait_max: float = 4.0   # s after the clock ends: land anyway
     land_vz: float = 0.8           # m/s descent
-    land_vz_slow: float = 0.2      # m/s final descent
-    land_slow_height: float = 0.4  # m above the pad: switch to slow
+    land_vz_slow: float = 0.3      # m/s final descent
+    land_slow_height: float = 0.25  # m above the pad: switch to slow
     land_vxy: float = 0.3
     odom_timeout: float = 0.25     # s: older pose -> zero velocity
     warn_scale: float = 0.5        # speed scale on localization WARN
@@ -84,7 +84,7 @@ class Mission:
             self.t_state = s.now
 
         if self.state in FLYING and not s.offboard:
-            if self.state == LANDED or (self.state == LANDING and s.landed):
+            if self.state == LANDED or (self.state == LANDING and (s.landed or not s.armed)):
                 self._go(s.now, DONE, 'offboard ended after touchdown')
             else:
                 self._go(s.now, ABORT, 'offboard lost in flight')

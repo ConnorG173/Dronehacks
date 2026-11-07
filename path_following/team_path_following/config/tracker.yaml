@@ -27,4 +27,5 @@ mission_tracker:
     mission.settle_time: 0.3
     mission.course_start_dz: 0.15    # start the course this close to hover height
     mission.land_vz: 0.8
-    mission.land_vz_slow: 0.2
+    mission.land_vz_slow: 0.3
+    mission.land_slow_height: 0.25

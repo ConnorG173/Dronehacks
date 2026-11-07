@@ -65,7 +65,7 @@ plans** (`planner_candidates`).
 
 Takeoff/landing (same course): climb 1.0 m/s (PX4's 3 s takeoff ramp dominates), settle 0.3 s, start the
 course 0.15 m below hover height, descend 0.8 m/s then 0.2 m/s below 0.4 m: mission 23.4 → **22.5 s**,
-touchdown error 1–2 cm.
+touchdown error 1–2 cm. Final descent at 0.3 m/s below 0.25 m (instead of 0.2 m/s below 0.4 m): mission 21.95 → **21.5 s**.
 
 ### Path clock (course v3)
 
