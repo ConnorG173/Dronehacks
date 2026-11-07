@@ -12,7 +12,7 @@
   <model name="skybeta">
     <self_collide>false</self_collide>
     <include merge="true">
-      <uri>model://x500</uri>
+      <uri>model://skybeta_frame</uri>  <!-- x500 dynamics, Sky Beta collision footprint (sim/tools/make_skybeta_frame.py) -->
     </include>
 
     <!-- Downward rangefinder. PX4's gz_bridge reads exactly link "lidar_sensor_link", sensor "lidar". -->

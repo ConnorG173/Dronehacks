@@ -10,8 +10,8 @@
     <transport_descriptor>
       <transport_id>udp_only</transport_id>
       <type>UDPv4</type>
-      <sendBufferSize>8388608</sendBufferSize>
-      <receiveBufferSize>8388608</receiveBufferSize>
+      <sendBufferSize>33554432</sendBufferSize>
+      <receiveBufferSize>33554432</receiveBufferSize>
     </transport_descriptor>
   </transport_descriptors>
   <participant profile_name="udp_only_participant" is_default_profile="true">

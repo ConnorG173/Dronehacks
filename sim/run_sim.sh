@@ -26,6 +26,9 @@ if [[ ! -f "$REPO/sim/gz/models/dronehacks_course/model.sdf" ]]; then
   "$HOME/.venvs/simtools/bin/python" "$REPO/sim/tools/step_to_gz.py" "$REPO/dronehacks-course-v3.step" \
     --out "$REPO/sim/gz/models/dronehacks_course" | tail -1
 fi
+if [[ ! -f "$REPO/sim/gz/models/skybeta_frame/model.sdf" ]]; then
+  python3 "$REPO/sim/tools/make_skybeta_frame.py" --px4 "$PX4_DIR"
+fi
 E="SIM_ID=$SIM_ID"
 tmux new-session -d -s "$TMUX_SESSION" -n gz "$E bash $S/gz.sh; bash"
 sleep 8

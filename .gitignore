@@ -4,3 +4,5 @@ planner/out/
 # sim: generated course model and run artifacts
 sim/gz/models/dronehacks_course/
 __pycache__/
+sim/gz/models/skybeta_base/
+sim/gz/models/skybeta_frame/

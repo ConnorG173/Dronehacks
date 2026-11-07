@@ -32,6 +32,11 @@ step "PX4 rcS: allow un-namespaced uXRCE-DDS for instance > 0 (PX4_NO_UXRCE_NS=1
 RCS="$PX4_DIR/ROMFS/px4fmu_common/init.d-posix/rcS"
 grep -q PX4_NO_UXRCE_NS "$RCS" || sed -i 's/^\(\s*\)uxrce_dds_ns="-n px4_$px4_instance"/\1[ -z "$PX4_NO_UXRCE_NS" ] \&\& uxrce_dds_ns="-n px4_$px4_instance"/' "$RCS"
 grep -n 'uxrce_dds_ns=' "$RCS"
+# Same flag also keeps MAV_SYS_ID = 1 for every instance: the organizers' flight interface addresses PX4
+# as system 1 (as on the drone), so instance N's default sysid N+1 would ignore its Offboard request.
+grep -q 'PX4_NO_UXRCE_NS" ] && param set MAV_SYS_ID' "$RCS" || \
+  sed -i 's/^\(\s*\)param set MAV_SYS_ID \$((px4_instance+1))/\1if [ -n "$PX4_NO_UXRCE_NS" ]; then param set MAV_SYS_ID 1; else param set MAV_SYS_ID $((px4_instance+1)); fi/' "$RCS"
+grep -n 'MAV_SYS_ID' "$RCS"
 
 step "rebuild PX4 SITL"
 cd "$PX4_DIR"
