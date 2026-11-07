@@ -146,7 +146,7 @@ def run_closed_loop(path, scale, model_kw=None, lead_s=1 / 0.95, fault_at=None):
     for k in range(int(80 / 0.05)):
         sp = c.step(0.05, m.x)
         if fault_at is not None and k * 0.05 >= fault_at and hold is None:
-            hold = sp.p                                   # path_streamer's HOLD: the on-path point
+            hold = sp.p                                   # HOLD: the on-path point
         sent = sp.q if hold is None else hold
         stalls += c.stalled and k > 0
         for j in range(10):
@@ -202,7 +202,6 @@ def test_fence():
 
 
 # ----------------------------------------------------------------------------- frames / attitude
-# (ported from the deleted test_bev.py: the attitude helpers moved from bev.py to core/frames.py)
 
 def q_px4(roll_deg=0.0, pitch_deg=0.0, yaw_deg=0.0):
     """PX4 attitude quaternion (w, x, y, z), FRD -> NED, ZYX Euler (PX4 conventions:

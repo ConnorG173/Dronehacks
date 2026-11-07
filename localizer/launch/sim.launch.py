@@ -5,8 +5,8 @@
 
 The lab container normally runs it without colcon:
   cd localizer && python3 -m localizer.sim [--i-have-team-approval]
-which also picks up the deployment parameter file (/etc/flyx/mission.yaml: use_sim_time).
-Here, pass use_sim_time:=true yourself if that file is not used.
+Both ways read /etc/flyx/mission.yaml (or DRONE_PARAMS_FILE) if it exists. This launch file also
+sets use_sim_time (default true); the approved node refuses to run without sim time.
 """
 import os
 

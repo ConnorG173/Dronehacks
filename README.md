@@ -83,8 +83,9 @@ python3 -m localizer.sim                           # passive: creates no publish
 python3 -m localizer.sim --i-have-team-approval    # arms, takes off, flies the path, lands
 ```
 
-It exits 0 after "landed and disarmed", 1 on any abort; it yields (stops streaming) if Offboard is
-lost. Optional ROS parameters go after `--ros-args`, e.g. `-p max_path_speed_mps:=0.5`.
+With the flag it also refuses to start unless `FLYX_LAB_ACTIVE=1` and `FLYX_HITL=0` and sim time
+is on (`echo $FLYX_LAB_ACTIVE $FLYX_HITL`). It exits 0 after "landed and disarmed", 1 on any abort;
+it yields (stops streaming) if Offboard is lost, holds and then lands on a fault. Optional ROS parameters go after `--ros-args`, e.g. `-p max_path_speed_mps:=0.5`.
 With a colcon-built workspace: `ros2 launch localizer sim.launch.py approved:=true`.
 A terminal run is not a graded Run; record it yourself with `ros2 bag record` if needed.
 
@@ -94,22 +95,23 @@ Each step needs the team's approval. The pilot arms on RC and switches to Offboa
 arms and never touches `/fmu/in`.
 
 1. **Deploy** only the package to the team workspace (`~/team_ws/src/localizer`; never `~/connor`),
-   for example from the laptop repo root:
-   `scp -r localizer/localizer localizer/launch localizer/data localizer/resource localizer/package.xml localizer/setup.py localizer/setup.cfg skybeta:~/team_ws/src/localizer/`
+   for example from the laptop repo root (Git Bash; excludes bytecode and tests):
+   `tar --exclude=__pycache__ -cf - -C localizer localizer launch data resource package.xml setup.py setup.cfg | ssh skybeta 'mkdir -p ~/team_ws/src/localizer && tar -xf - -C ~/team_ws/src/localizer'`
 2. **Build** in the `skybeta-stack` container with the team build script (`team_build.sh`), as for
    any team package.
-3. **Preview** (props off is fine), next to the running flight_interface:
-   `ros2 launch localizer real.launch.py with_flight_interface:=false`
+3. **Preview** (props off is fine), next to the stack's running flight_interface:
+   `ros2 launch localizer real.launch.py`
    then watch `/localizer/status` (mode, T, `expected_trajectory_setpoint_ned`, `expected_yaw_ned_deg`
    vs `px4_yaw_ned_deg`) and `/localizer/setpoint_preview`. `dry_run:=true` plays the whole path
    on the preview topic without a vehicle.
-4. **Bench, props off**: `ros2 launch localizer real.launch.py with_flight_interface:=false live:=true`
+4. **Bench, props off**: `ros2 launch localizer real.launch.py live:=true`
    and check `/fmu/in/trajectory_setpoint`; measure the yaw offset (HALF_ASSED.md).
    Pass `mpc_xy_p:=<the drone's MPC_XY_P>` and `command_yaw:=false` until the yaw agrees.
 5. **Flight**: tethered hover, then pad to M1 at <= 1 m/s, then the full course with a speed ramp
    (`max_path_speed_mps:=`). To start it from the stack instead, set `COMPETITOR_PKG=localizer` and
-   `COMPETITOR_LAUNCH=real.launch.py` in `/etc/skybeta/drone.env` (ask first); there,
-   `with_flight_interface` must stay true and `live:=true` is still needed to fly.
+   `COMPETITOR_LAUNCH=real.launch.py` in `/etc/skybeta/drone.env` (ask first); there it needs
+   `with_flight_interface:=true` (default false, so a manual launch never starts a second one) and
+   `live:=true` to fly. How the stack passes launch arguments is not verified.
 
 ## Run the tests (laptop, no ROS)
 

@@ -244,7 +244,7 @@ def test_status_lost_counts_as_offboard_lost(cpath):
 
 
 def test_real_offboard_lost_holds(cpath):
-    r = Rig(cpath, real_cfg())                             # on_offboard_lost="hold" (path_streamer)
+    r = Rig(cpath, real_cfg())                             # on_offboard_lost="hold" (real)
     fly_to_follow(r)
     r.s.offboard = False
     cmd = r.step(track=False)
@@ -305,3 +305,99 @@ def test_dry_run_runs_the_path_without_a_vehicle(cpath):
 def test_bad_config_rejected():
     with pytest.raises(ValueError):
         Config(on_offboard_lost="land")
+
+
+# ----------------------------------------------------------------------------- review regressions
+
+def test_sim_armed_and_offboard_before_our_request_stops(cpath):
+    r = Rig(cpath, sim_cfg())
+    r.step()
+    r.s.armed = r.s.offboard = True                        # someone else armed + switched to Offboard
+    cmd = r.step()
+    assert r.f.mode == "STOPPED" and not cmd.publish
+
+
+def test_sim_preflight_timeout_fires_in_ready_even_when_stale(cpath):
+    r = Rig(cpath, sim_cfg(wait_timeout_s=5.0))
+    r.step()
+    assert r.f.mode == "READY"
+    r.s.pose_stamp = r.s.status_stamp = None               # telemetry gone before the request
+    r.run_until(lambda c: r.f.mode == "STOPPED", n=200, fresh=False)
+    assert "preflight" in r.f.reason
+
+
+def test_sim_telemetry_lost_after_request_stops(cpath):
+    r = Rig(cpath, sim_cfg())
+    r.run_until(lambda c: c.request_offboard_arm)
+    r.t += 1.5                                             # status and pose stale after the request
+    cmd = r.step(fresh=False)
+    assert r.f.mode == "STOPPED" and "telemetry lost" in r.f.reason and not cmd.publish
+
+
+def test_sim_arm_timeout_while_armed_requests_land(cpath):
+    r = Rig(cpath, sim_cfg())
+    r.run_until(lambda c: c.request_offboard_arm)
+    r.s.armed = True                                       # armed, but never Offboard
+    cmd = r.run_until(lambda c: r.f.mode == "STOPPED", n=400)
+    assert cmd.request_land and not cmd.publish and "timed out" in r.f.reason
+
+
+def test_prime_is_two_seconds_of_streaming(cpath):
+    r = Rig(cpath, sim_cfg())
+    r.step()                                               # pad init, nothing streamed
+    r.run_until(lambda c: c.request_offboard_arm)
+    streamed = [c for c in r.cmds if c.publish]
+    assert (len(streamed) - 1) * DT == pytest.approx(2.0)  # first streamed tick to the request
+
+
+def test_takeoff_timeout_faults_to_hold(cpath):
+    r = Rig(cpath, sim_cfg(land_after_hold_s=None))
+    r.run_until(lambda c: c.request_offboard_arm)
+    r.s.armed = r.s.offboard = True
+    r.step(track=False)
+    assert r.f.mode == "TAKEOFF"
+    r.run_until(lambda c: r.f.mode == "HOLD", n=600, track=False)   # vehicle never climbs
+    assert "takeoff timeout" in r.f.reason and 25.0 <= r.t - r.f.takeoff_t0 <= 25.2
+
+
+def test_follow_without_progress_faults_to_hold(cpath):
+    r = Rig(cpath, real_cfg())
+    fly_to_follow(r)
+    r.run_until(lambda c: r.f.mode == "HOLD", n=600, track=False)   # vehicle stops moving
+    assert "no path progress" in r.f.reason
+
+
+def test_hold_after_finish_keeps_resending_land(cpath):
+    r = Rig(cpath, sim_cfg())
+    r.run_until(lambda c: c.request_offboard_arm)
+    r.s.armed = r.s.offboard = True
+    r.run_until(lambda c: c.request_land)                  # FINISH, first NAV_LAND
+    r.s.estimate_ok = False
+    r.step()
+    assert r.f.mode == "HOLD"
+    r.s.estimate_ok = True
+    assert sum(r.step().request_land for _ in range(50)) == 2      # every 1 s (2.5 s window), no 10 s pause
+
+
+def test_landing_rearm_during_ground_confirmation_stops(cpath):
+    r = Rig(cpath, sim_cfg())
+    r.run_until(lambda c: c.request_offboard_arm)
+    r.s.armed = r.s.offboard = True
+    r.run_until(lambda c: c.request_land)
+    r.s.offboard, r.s.auto_land = False, True
+    r.step()
+    assert r.f.mode == "LANDING"
+    r.s.armed, r.s.landed = False, False                   # disarmed, no landed report yet
+    r.step()
+    r.s.armed = True                                       # re-armed
+    r.step()
+    assert r.f.mode == "STOPPED" and "re-armed" in r.f.reason
+
+
+def test_ready_yaw_only_when_configured(cpath):
+    r = Rig(cpath, real_cfg())
+    r.step()
+    assert r.step().q_yaw is None                          # real: READY does not command heading
+    r = Rig(cpath, sim_cfg(ready_commands_yaw=True))
+    r.step()
+    assert r.step().yaw is not None

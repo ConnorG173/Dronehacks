@@ -1,7 +1,8 @@
 # What is half-assed (fix before trusting this in the course)
 
 This build exists to test the setpoint path to PX4 (brief option A: correct the route, not
-EKF2). Every shortcut is tagged `HALF-ASSED:` in the code: `grep -rn HALF-ASSED localizer`.
+EKF2). Shortcuts with a code location are tagged `HALF-ASSED:` (`grep -rn HALF-ASSED localizer`);
+this file also lists deployment shortcuts that have no single code location.
 The core is `localizer/core/` (shared by both adapters); "real" means `localizer/real.py`, "sim"
 `localizer/sim.py`.
 
@@ -22,13 +23,14 @@ The core is `localizer/core/` (shared by both adapters); "real" means `localizer
 | `odom_to_ned_yaw_offset_rad` is assumed 0, and yaw is commanded (`command_yaw`). | If PX4's heading and the odom heading disagree, the drone yaws to the wrong heading. Measure it on the bench (status shows `expected_yaw_ned_deg` next to `px4_yaw_ned_deg`). Use `command_yaw:=false` until they agree. | measure, then set the flight_interface parameter (10) |
 | Position-only setpoints (flight_interface drops velocity/acceleration). The on-path lead point p(tau + rate/`mpc_xy_p`) stands in for the feedforward, and it assumes the drone's `MPC_XY_P` = 0.95 (the v1.16 default). The path is played at `max_path_speed_mps` (1.0) by slowing time. | With the wrong Kp the vehicle runs up to about 0.35 m ahead of or behind p(tau) (model, Kp 0.7/1.3); cross-track stays under 0.1 m. | Read `MPC_XY_P` off the drone and pass `mpc_xy_p:=`. For speed, add velocity feedforward to flight_interface (proposal, not applied) |
 | If the node dies, flight_interface keeps holding the last setpoint sent: the lead point, up to 1.05 m ahead on the planned path at 1 m/s. | The vehicle flies on to that point and stops there. It is on the collision-checked path, but further along than where it was. | flight_interface expiry of a feedforward setpoint |
-| `COMPETITOR_PKG` is unchanged, so a stack restart brings `square_mission` back. | The adapter refuses to publish live while another publisher exists on `/skybeta/setpoint/pose`. | ask before changing `/etc/skybeta/drone.env` |
+| `COMPETITOR_PKG` is unchanged, so a stack restart brings `square_mission` back. | The adapter refuses to publish live while any other publisher exists on `/skybeta/setpoint/pose` (checked at start and every 1 s). | ask before changing `/etc/skybeta/drone.env` |
+| `vo_state` comes from the optional `isaac_ros_visual_slam_interfaces`; if it is missing (logged as an error) or never published, VO failures are not detected. A stale `vo_state` keeps its last value. | Only the jump check and stale odometry catch a bad VO pose. | require the VO status, with a freshness check |
 
 ## Sim adapter
 | Shortcut | Consequence |
 |---|---|
 | Never run against the real simulator yet (no ROS on the laptop). The full feedforward (finite TrajectorySetpoint velocity/acceleration/yawspeed) is new: no lab example sets it. | Watch the first approved run closely; the position-only fallback is to send `q` instead of `p, v, a` in `fill_trajectory_setpoint`. |
-| `--i-have-team-approval` refuses unless `FLYX_LAB_ACTIVE=1`, which is only known from the lab's notebook and `onboard/services.py`. | If the terminal does not export it, the approved run refuses to start (safe failure); check with `echo $FLYX_LAB_ACTIVE`. |
+| `--i-have-team-approval` refuses unless `FLYX_LAB_ACTIVE=1`, `FLYX_HITL=0` (the lab notebook's simulator-only guard; only known from the notebook and `onboard/services.py`) and `use_sim_time` is true. | If the terminal does not export them, the approved run refuses to start (safe failure); check with `echo $FLYX_LAB_ACTIVE $FLYX_HITL`. |
 
 ## Offline model (`test/closed_loop.py`, `test/px4_model.py`)
 PX4 is modelled with PositionControl's P-PID cascade at the v1.16 defaults. Assumed, not PX4

@@ -102,7 +102,9 @@ def test_real_source_cannot_reach_fmu_in():
                     ("String", '"/localizer/status"')]
     assert real.PREVIEW_TOPIC == "/localizer/setpoint_preview" and real.LIVE_TOPIC == "/skybeta/setpoint/pose"
     assert re.search(r"self\.topic = LIVE_TOPIC if self\.live else PREVIEW_TOPIC", code)
-    assert re.search(r'P\("live", False\)', code)                             # preview is the default
+    assert re.search(r'P\("live", False, ro\)', code)                         # preview default, read-only
+    assert re.search(r"n = self\.count_publishers\(self\.topic\)", code)     # any other publisher blocks
+    assert "self.blocked = self.live" in code                                 # blocked until checked
 
 
 def test_real_chain_course_to_px4_ned():
@@ -184,6 +186,14 @@ def test_sim_approval_flag_and_lab_guard(monkeypatch):
     assert not sim.sim_config(False).self_arm and sim.sim_config(True).self_arm
     monkeypatch.delenv("FLYX_LAB_ACTIVE", raising=False)
     assert sim.main(["--i-have-team-approval"]) == 2                          # refused before ROS starts
+    monkeypatch.setenv("FLYX_LAB_ACTIVE", "1")
+    monkeypatch.delenv("FLYX_HITL", raising=False)
+    assert sim.main(["--i-have-team-approval"]) == 2                          # HITL unknown: refused
+    monkeypatch.setenv("FLYX_HITL", "1")
+    assert sim.main(["--i-have-team-approval"]) == 2                          # real FC attached: refused
+    assert sim.simulator_only({"FLYX_LAB_ACTIVE": "1", "FLYX_HITL": "0"})
+    code = open(os.path.join(PKG, "sim.py"), encoding="utf-8").read()
+    assert 'if approved and not g("use_sim_time"):' in code
 
 
 def test_sim_publishers_only_with_approval():

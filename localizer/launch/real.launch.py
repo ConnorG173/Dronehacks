@@ -1,15 +1,16 @@
 """Real drone (skybeta Jetson): the follower's real adapter (+ flight_interface, exactly as
 competitor.launch.py starts it).
 
-  # next to an already-running flight_interface: preview topic only (the default)
-  ros2 launch localizer real.launch.py with_flight_interface:=false
+  # next to the stack's running flight_interface: preview topic only (the defaults)
+  ros2 launch localizer real.launch.py
 
   # the bench step (team approval): our lead points reach flight_interface -> PX4
-  ros2 launch localizer real.launch.py with_flight_interface:=false live:=true
+  ros2 launch localizer real.launch.py live:=true
 
-As COMPETITOR_PKG=localizer / COMPETITOR_LAUNCH=real.launch.py (ask first: /etc/skybeta/drone.env),
-with_flight_interface defaults true so the stack's competitor window gets the flight interface it
-needs. Do not start a second flight_interface next to a running one.
+with_flight_interface:=true also starts flight_interface exactly as competitor.launch.py does. Use
+it only where nothing else runs one, e.g. when the stack starts this launch as
+COMPETITOR_PKG=localizer / COMPETITOR_LAUNCH=real.launch.py (ask first: /etc/skybeta/drone.env).
+Never start a second flight_interface next to a running one.
 """
 import os
 
@@ -26,7 +27,7 @@ from launch_ros.parameter_descriptions import ParameterValue
 def generate_launch_description():
     share = get_package_share_directory('localizer')
     args = [
-        DeclareLaunchArgument('with_flight_interface', default_value='true'),
+        DeclareLaunchArgument('with_flight_interface', default_value='false'),
         DeclareLaunchArgument('live', default_value='false',
                               description='true: publish to /skybeta/setpoint/pose; '
                                           'false: /localizer/setpoint_preview only'),

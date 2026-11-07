@@ -26,6 +26,7 @@ from localizer.core.path import load_path, path_to_course
 
 try:
     import rclpy
+    from rcl_interfaces.msg import ParameterDescriptor
     from geometry_msgs.msg import PoseStamped
     from nav_msgs.msg import Odometry
     from rclpy.node import Node
@@ -108,7 +109,8 @@ class RealAdapter(Node):
         super().__init__("real_follower")
         P = self.declare_parameter
         P("path_file", "")
-        P("live", False)                     # False: preview topic only. True: /skybeta/setpoint/pose
+        ro = ParameterDescriptor(read_only=True)   # changing these at runtime must not look accepted
+        P("live", False, ro)                 # False: preview topic only. True: /skybeta/setpoint/pose
         P("rate_hz", 20.0)
         P("pad_x", -2.5146)                  # planner/config/course_v3.yaml StartPos
         P("pad_y", 0.9144)
@@ -124,8 +126,8 @@ class RealAdapter(Node):
         P("fence_margin_m", 0.3)             # setpoint clamp
         P("fence_fault_margin_m", 0.15)      # vehicle outside -> HOLD
         P("jump_m", 0.5)
-        P("command_yaw", True)
-        P("dry_run", False)                  # preview only: pretend Offboard + perfect tracking
+        P("command_yaw", True)               # HALF-ASSED: odom_to_ned_yaw_offset assumed 0 (HALF_ASSED.md)
+        P("dry_run", False, ro)              # preview only: pretend Offboard + perfect tracking
         g = lambda n: self.get_parameter(n).value
 
         self.live = bool(g("live"))
@@ -145,9 +147,10 @@ class RealAdapter(Node):
         self.state_z = None
         self.vo_state = None
         self.att = None                      # (tilt_deg, yaw_ned)
-        self.blocked = False
+        self.blocked = self.live             # live: blocked until the first publisher check
         self.last_mode = None
         self.sent = None                     # (xyz_enu, yaw_enu) last published
+        self.first_check = True
 
         px4_qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, durability=DurabilityPolicy.TRANSIENT_LOCAL,
                              history=HistoryPolicy.KEEP_LAST, depth=1)
@@ -166,11 +169,12 @@ class RealAdapter(Node):
         try:
             from isaac_ros_visual_slam_interfaces.msg import VisualSlamStatus
             self.create_subscription(VisualSlamStatus, "/visual_slam/status", self.vo_cb, qos_profile_sensor_data)
-        except ImportError:
-            pass
+        except ImportError as e:
+            self.get_logger().error(f"no VisualSlamStatus ({e}): vo_state unknown, VO failures are NOT detected")
         self.create_timer(1.0 / float(g("rate_hz")), self.tick)
         self.create_timer(0.5, self.publish_status)
         self.create_timer(1.0, self.check_other_publishers)
+        self.check_other_publishers()
         f = self.follower
         self.get_logger().info(
             f"path {path.duration:.1f} s, peak {path.speed.max():.2f} m/s, played at x{f.scale:.2f}"
@@ -213,14 +217,19 @@ class RealAdapter(Node):
 
     # ------------------------------------------------------------------ safety (ROS graph only)
     def check_other_publishers(self):
-        """Live only: another node publishing setpoints (square_mission after a stack restart)
-        would interleave with ours in flight_interface. Refuse to publish while one exists."""
+        """Live only: another publisher of setpoints (square_mission after a stack restart, or a second
+        follower) would interleave with ours in flight_interface. Refuse to publish while one exists.
+        HALF-ASSED: a guard against a mis-set COMPETITOR_PKG, not a fix for it."""
         if not self.live:
             return
-        others = [i for i in self.get_publishers_info_by_topic(self.topic) if i.node_name != self.get_name()]
-        was, self.blocked = self.blocked, bool(others)
-        if self.blocked and not was:
-            self.get_logger().error(f"another publisher on {self.topic}: {[i.node_name for i in others]} - NOT publishing")
+        n = self.count_publishers(self.topic)          # includes our own publisher
+        was, self.blocked = self.blocked, n != 1
+        if self.blocked and not was or (self.blocked and self.first_check):
+            names = [i.node_name for i in self.get_publishers_info_by_topic(self.topic)]
+            self.get_logger().error(f"{n} publishers on {self.topic} ({names}) - NOT publishing")
+        elif was and not self.blocked:
+            self.get_logger().info(f"only our publisher on {self.topic}: publishing")
+        self.first_check = False
 
     # ------------------------------------------------------------------ the 20 Hz tick
     def tick(self):

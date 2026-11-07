@@ -9,8 +9,8 @@
     cd localizer && python3 -m localizer.sim --i-have-team-approval   # arms and flies (simulator only)
 
 Without --i-have-team-approval the node creates no publisher at all and only logs what it would
-do. With it, it refuses to start unless FLYX_LAB_ACTIVE=1 (set in the DroneHacks lab), so it can
-never arm the real drone. Use Reset world first. All QoS is PX4's BEST_EFFORT + TRANSIENT_LOCAL
+do. With it, it refuses to start unless FLYX_LAB_ACTIVE=1 and FLYX_HITL=0 (the lab notebook's own
+simulator-only guard) and use_sim_time is true, so it can never arm a real flight controller. Use Reset world first. All QoS is PX4's BEST_EFFORT + TRANSIENT_LOCAL
 depth 1. Time is the node clock (use_sim_time comes from the deployment parameter file, exactly as
 onboard/examples/takeoff_land.py does). All decisions are in localizer.core.follower.
 """
@@ -45,6 +45,7 @@ def sim_config(approved, **params):
     cfg.self_arm, cfg.land_at_end, cfg.land_after_hold_s = bool(approved), True, 10.0
     cfg.on_offboard_lost, cfg.z_from_pad, cfg.wait_timeout_s = "stop", True, 45.0
     cfg.max_pad_offset_m = cfg.max_pad_yaw_deg = cfg.max_tilt_diff_deg = None
+    cfg.ready_commands_yaw = True        # like takeoff_land: the priming setpoint holds the heading
     return cfg
 
 
@@ -88,7 +89,9 @@ def fill_offboard_mode(msg, stamp_us):
 
 
 def fill_trajectory_setpoint(msg, cmd, stamp_us):
-    """Command (local ENU) -> TrajectorySetpoint (NED): the full feedforward p, v, a, yaw, yawspeed."""
+    """Command (local ENU) -> TrajectorySetpoint (NED): the full feedforward p, v, a, yaw, yawspeed.
+    HALF-ASSED: finite velocity/acceleration feedforward has never run in the simulator (no lab
+    example sets it); the position-only fallback is to send cmd.q, cmd.q_yaw and NaN v, a."""
     msg.timestamp = stamp_us
     msg.position = [float(v) for v in F.enu_to_ned(cmd.p)]
     msg.velocity = [float(v) for v in F.enu_to_ned(cmd.v)]
@@ -107,6 +110,12 @@ def fill_vehicle_command(msg, command, stamp_us, p1=0.0, p2=0.0):
     msg.target_system = msg.target_component = msg.source_system = msg.source_component = 1
     msg.from_external = True
     return msg
+
+
+def simulator_only(env):
+    """The lab notebook's guard for the isolated DroneHacks simulator (learn/ notebook, cell 41).
+    HALF-ASSED: the variables are only known from the notebook and onboard/services.py."""
+    return env.get("FLYX_LAB_ACTIVE") == "1" and env.get("FLYX_HITL") == "0"
 
 
 def split_approval(argv):
@@ -138,6 +147,8 @@ class SimAdapter(Node):
         P("pad_heading_deg", 0.0)            # StartHeadingDeg (ASSUMED 0)
         P("max_path_speed_mps", 1.0)
         g = lambda n: self.get_parameter(n).value
+        if approved and not g("use_sim_time"):
+            raise SystemExit(f"{APPROVAL_FLAG} refused: use_sim_time is false, this is not the simulator")
         self.approved = approved
         cfg = sim_config(approved, pad_xy=(float(g("pad_x")), float(g("pad_y"))),
                          pad_yaw=math.radians(float(g("pad_heading_deg"))),
@@ -221,9 +232,9 @@ class SimAdapter(Node):
 
 def main(argv=None):
     approved, argv = split_approval(sys.argv[1:] if argv is None else argv)
-    if approved and os.environ.get("FLYX_LAB_ACTIVE") != "1":
-        print(f"{APPROVAL_FLAG} refused: FLYX_LAB_ACTIVE is not 1, this is not the DroneHacks simulator. "
-              "The simulator adapter must never arm a real drone.", file=sys.stderr)
+    if approved and not simulator_only(os.environ):
+        print(f"{APPROVAL_FLAG} refused: needs FLYX_LAB_ACTIVE=1 and FLYX_HITL=0 (the DroneHacks simulator). "
+              "The simulator adapter must never arm a real flight controller.", file=sys.stderr)
         return 2
     rclpy.init(args=ros_arguments(argv))
     node = SimAdapter(approved)

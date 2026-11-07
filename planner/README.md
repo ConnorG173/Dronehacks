@@ -3,9 +3,11 @@
 A standalone program that reads a course map, a start pose, an ordered list of
 checkpoints and a goal, computes the fastest dynamically feasible trajectory
 through all checkpoints with [GCOPTER](https://github.com/ZJU-FAST-Lab/GCOPTER),
-validates it, and writes a time-sampled path file in PX4 local NED. The flight
-code runs it once at startup and streams the file to PX4 as
-`TrajectorySetpoint` (position, velocity, acceleration, yaw, yawspeed).
+validates it, and writes a time-sampled path file in PX4 local NED at the pad.
+The flight code (`../localizer`) loads a committed copy of that file and plays it
+on a lag-governed path clock: the simulator adapter sends `TrajectorySetpoint`
+(position, velocity, acceleration, yaw, yawspeed), the real-drone adapter a
+position-only lead point to `/skybeta/setpoint/pose`.
 
 It does not use ROS and never talks to PX4. It is not flight code.
 
@@ -109,7 +111,7 @@ upstream names have upstream `global_planning.yaml` defaults.
 | `WeightT`, `ChiVec`, `SmoothingEps`, `IntegralIntervs`, `RelCostTol` | optimizer settings (upstream) |
 | `VehicleMass`, `GravAcc`, `HorizDrag`, `VertDrag`, `ParasDrag`, `SpeedEps` | `physicalParams`. **TODO(vehicle): placeholders (upstream's demo quad), not our drone** |
 | `OutDir` | output directory (overridden by `--out`) |
-| `SampleDt` | path-file row spacing (s), default 0.01 |
+| `SampleDt` | path-file row spacing (s); 0.01 in both configs |
 | `YawMinSpeed`, `YawRateMaxDeg`, `YawSmoothTime` | yaw generation, see Frames |
 
 Real vehicle values still to measure: mass, thrust range, drag terms, and
@@ -236,8 +238,9 @@ rows = np.frombuffer(raw, "<f8", offset=32).reshape(-1, 12)
 the RRT route in map coordinates (debugging and the parity test).
 
 The first row is at rest at `(0, 0, -HoverHeight)` with yaw 0: the flight code
-should take off, settle at that point, then stream rows by elapsed time and hold
-the last row (at rest at the goal) afterwards.
+takes off, settles at that point, then follows the rows (`localizer/core/clock.py`
+slows the playback when the vehicle lags) and holds the last row (at rest at the
+goal) afterwards.
 
 ## Frames
 
@@ -267,11 +270,11 @@ map +y).
 | velocity (0, 4, 0) | (4, 0, 0) | 4 m/s forward |
 | heading 0 deg (facing map +x) | yaw +90 deg | facing right |
 
-This assumes PX4's local `+x` is the vehicle's forward direction at startup
-(as with an external-vision frame initialised at the pad). If PX4's local frame
-is north-aligned instead (magnetometer/GPS), set `StartHeadingDeg` to the map
-direction of north and expect a non-zero initial yaw error; check this in the
-flight code before streaming.
+`StartHeadingDeg` is the vehicle's physical heading on the pad, in the map
+frame; the follower's `pad_heading_deg` parameter must equal it. Do not set it to
+north for a north-aligned PX4 frame: the follower measures its own transform from
+the vehicle's local frame to the pad frame on the pad (`localizer/core/frames.py`
+`pad_init`), which absorbs any rotation or offset of PX4's local frame.
 
 **Yaw** (GCOPTER plans none): heading = direction of horizontal velocity;
 below `YawMinSpeed` the last heading is held (the start heading until the

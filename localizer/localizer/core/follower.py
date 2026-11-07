@@ -9,10 +9,12 @@ T = course <- local, set once on the pad.
 
 States
   WAIT     wait for a fresh position, valid estimator, fresh status, landed + disarmed; pad init (T)
-  READY    stream "hold where you are". self_arm: after prime_s request Offboard + arm once, give up
-           after arm_timeout_s, abort if the vehicle arms before our request. Otherwise wait for the
-           pilot. Armed + Offboard -> TAKEOFF
+  READY    stream "hold where you are". self_arm (takeoff_land.py's sequence): after prime_s of
+           streaming request Offboard + arm once; stop on the preflight timeout, if the vehicle arms
+           before our request, if telemetry is lost after it, or after arm_timeout_s (requesting
+           NAV_LAND if armed). Otherwise wait for the pilot. Armed + Offboard -> TAKEOFF
   TAKEOFF  command the path start (hover point); within takeoff_radius_m for takeoff_settle_s -> FOLLOW
+           (fault after takeoff_timeout_s)
   FOLLOW   PathClock: governed path time, p/v/a feedforward and the on-path lead point q
   FINISH   path complete: hold the goal; land_at_end requests NAV_LAND every land_resend_s
   HOLD     fault: hold the last on-path point p(tau) (never the lead point); optional land request
@@ -22,9 +24,10 @@ States
   STOPPED  yielded: publish nothing, ever again (restart the node for a new run)
 
 Faults (-> HOLD from TAKEOFF/FOLLOW/FINISH, -> STOPPED from READY): stale position, local
-position jump > jump_m, estimator not ok, vehicle outside the course fence.
+position jump > jump_m, estimator not ok, vehicle outside the course fence, takeoff timeout,
+no path progress for follow_stall_s.
 Offboard (or arming) lost while flying: Config.on_offboard_lost, "hold" keeps streaming the hold
-point (real drone, the previous path_streamer behaviour), "stop" -> STOPPED (simulator, like
+point (real drone), "stop" -> STOPPED (simulator, like
 onboard/examples/takeoff_land.py).
 """
 from __future__ import annotations
@@ -64,6 +67,9 @@ class Config:
     takeoff_radius_m: float = 0.25
     takeoff_settle_s: float = 2.0
     command_yaw: bool = True                   # False: yaw None (do not command heading)
+    ready_commands_yaw: bool = False           # READY "hold here": also command the current heading
+    takeoff_timeout_s: Optional[float] = 25.0  # TAKEOFF not settled after this -> fault (HOLD)
+    follow_stall_s: Optional[float] = 10.0     # path time advanced < 0.1 s in this long -> fault (HOLD)
     # faults
     jump_m: float = 0.5                        # local position step that counts as an estimator jump
     pose_timeout_s: float = 0.5
@@ -148,6 +154,8 @@ class Follower:
         self.ready_t0 = None
         self.arm_requested_at = None
         self.settle_t0 = None
+        self.takeoff_t0 = None
+        self.progress = None            # (time, tau) of the last path progress in FOLLOW
         self.hold_t0 = None
         self.land_requested_at = None
         self.disarmed_at = None
@@ -271,7 +279,8 @@ class Follower:
             return cmd
         # HOLD
         cmd = self._hold_cmd()
-        if c.land_after_hold_s is not None and now - self.hold_t0 >= c.land_after_hold_s:
+        if self.land_requested_at is not None or (
+                c.land_after_hold_s is not None and now - self.hold_t0 >= c.land_after_hold_s):
             cmd.request_land = self._land_due(now)
         return cmd
 
@@ -301,33 +310,38 @@ class Follower:
                 self.z0 = float(s.pos[2]) if c.z_from_pad else 0.0
                 self._set(READY, "pad init done; waiting for Offboard"
                           + (" (we request it)" if c.self_arm else " (pilot)"))
-                self.ready_t0 = now
+                self.ready_t0 = None          # priming starts with the first streamed setpoint
         return self._idle()
 
     def _ready(self, now, s, pose_ok, status_ok, armed, offboard):
         """Returns a Command, or None after switching to TAKEOFF (handled in the same step)."""
         c = self.cfg
+        requested = self.arm_requested_at is not None
+        if c.self_arm:                                   # the order of takeoff_land.py's checks
+            if not requested and c.wait_timeout_s is not None and now - self.t_start > c.wait_timeout_s:
+                return self._stop("preflight timeout before the arm request; nothing was requested")
+            if not requested and status_ok and s.armed:
+                return self._stop("vehicle armed before our request; yielding")
+            if requested and now - self.arm_requested_at > c.arm_timeout_s:
+                self._set(STOPPED, "Offboard / arm request timed out")
+                cmd = self._idle()
+                cmd.request_land = bool(status_ok and s.armed)   # armed but not Offboard: land it
+                return cmd
+            if requested and not (pose_ok and status_ok):
+                return self._stop("telemetry lost after the arm request; yielding")
         if not (pose_ok and status_ok):
-            self.ready_t0 = None if self.arm_requested_at is None else self.ready_t0
+            self.ready_t0 = None                         # restart priming after the gap
             self.reason = "position or status stale; not streaming"
             return self._idle()
-        if armed and offboard:
+        if armed and offboard and (requested or not c.self_arm):
             self._set(TAKEOFF, "climbing to the path start")
-            self.settle_t0 = None
+            self.settle_t0, self.takeoff_t0 = None, now
             self.hold = self.path.at(0.0)
             return None
-        if c.self_arm:
-            if self.arm_requested_at is None and s.armed:
-                return self._stop("vehicle armed before our request; yielding")
-            if self.arm_requested_at is None and c.wait_timeout_s is not None \
-                    and now - self.t_start > c.wait_timeout_s:
-                return self._stop("preflight timeout before the arm request")
-            if self.arm_requested_at is not None and now - self.arm_requested_at > c.arm_timeout_s:
-                return self._stop("Offboard / arm request timed out")
         # like square_mission / takeoff_land: stream where we are, so Offboard starts with a hold
+        ryaw = float(s.yaw) if (c.command_yaw and c.ready_commands_yaw) else None
         cmd = Command(self.mode, self.reason, publish=True, p=np.asarray(s.pos, float).copy(),
-                      yaw=float(s.yaw) if c.command_yaw else None, q=np.asarray(s.pos, float).copy(),
-                      q_yaw=float(s.yaw) if c.command_yaw else None)
+                      yaw=ryaw, q=np.asarray(s.pos, float).copy(), q_yaw=ryaw)
         self.sent = None
         if c.self_arm:
             if self.ready_t0 is None:
@@ -345,6 +359,9 @@ class Follower:
         if not (pose_ok or c.dry_run):
             self._fault("position stale", now)
             return self._hold_cmd()
+        if c.takeoff_timeout_s is not None and now - self.takeoff_t0 > c.takeoff_timeout_s:
+            self._fault("takeoff timeout: not settled at the path start", now)
+            return self._hold_cmd()
         veh = np.r_[xy, z] if c.dry_run else self.vehicle
         self.err = float(np.linalg.norm(veh - np.r_[xy, z]))
         if self.err > c.takeoff_radius_m:
@@ -355,6 +372,7 @@ class Follower:
             self.clock = PathClock(self.path, self.scale, lead_s=1.0 / c.mpc_xy_p, e_ok_m=c.lag_ok_m,
                                    e_stop_m=c.max_tracking_err_m, r_slew=c.clock_slew_per_s)
             self._set(FOLLOW, "following the path")
+            self.progress = (now, 0.0)
         return self._course_cmd(np.r_[xy, z], yaw)
 
     def _follow(self, now, s, pose_ok, dt):
@@ -372,6 +390,12 @@ class Follower:
                 return self._hold_cmd()
         sp = self.sp = self.clock.step(dt, veh)
         self.err = sp.err
+        if sp.tau - self.progress[1] >= 0.1 or self.clock.done:
+            self.progress = (now, sp.tau)
+        elif c.follow_stall_s is not None and now - self.progress[0] > c.follow_stall_s:
+            self.hold = (sp.p[:2], sp.p[2], self.path.at(sp.tau)[2])
+            self._fault(f"no path progress for {c.follow_stall_s:.0f} s (lag {sp.lag:.2f} m)", now)
+            return self._hold_cmd()
         yaw_p = self.path.at(sp.tau)[2]
         self.hold = (sp.p[:2], sp.p[2], yaw_p)     # a fault holds p(tau), never the lead point
         if self.clock.done:
@@ -387,7 +411,8 @@ class Follower:
         if not status_ok:
             return self._stop("status lost while landing; check the vehicle")
         if s.armed:
-            self.disarmed_at = None
+            if self.disarmed_at is not None:
+                return self._stop("vehicle re-armed during ground confirmation; yielding")
             if not s.auto_land:
                 return self._stop("flight mode changed during the automatic landing; yielding")
             return self._idle()

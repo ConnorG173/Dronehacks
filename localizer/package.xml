@@ -13,6 +13,10 @@
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>nav_msgs</exec_depend>
   <exec_depend>px4_msgs</exec_depend>
+  <exec_depend>rcl_interfaces</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
   <!-- real adapter only (skybeta Jetson): fmu_topic() and the flight_interface launch include -->
   <exec_depend>skybeta_flight_interface</exec_depend>
   <exec_depend>competitor_example</exec_depend>
