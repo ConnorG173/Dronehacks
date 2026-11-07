@@ -68,6 +68,7 @@ class Config:
     takeoff_settle_s: float = 2.0
     command_yaw: bool = True                   # False: yaw None (do not command heading)
     ready_commands_yaw: bool = False           # READY "hold here": also command the current heading
+    hold_heading: bool = False                 # fly the whole path at the pad heading (no yaw changes)
     takeoff_timeout_s: Optional[float] = 25.0  # TAKEOFF not settled after this -> fault (HOLD)
     follow_stall_s: Optional[float] = 10.0     # path time advanced < 0.1 s in this long -> fault (HOLD)
     # faults
@@ -196,6 +197,9 @@ class Follower:
             v, a = np.zeros(3), np.zeros(3)
         qxy = clamp_to_fence(q[:2], c.cage_half_m, c.fence_margin_m)
         q_yaw = yaw if q_yaw is None else q_yaw
+        if c.hold_heading:
+            yaw = q_yaw = c.pad_yaw
+            yaw_rate = 0.0
         self.sent = (np.r_[qxy, q[2]], q_yaw)
         T = self.T
         return Command(

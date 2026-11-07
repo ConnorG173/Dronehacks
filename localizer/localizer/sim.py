@@ -88,18 +88,26 @@ def fill_offboard_mode(msg, stamp_us):
     return msg
 
 
-def fill_trajectory_setpoint(msg, cmd, stamp_us):
-    """Command (local ENU) -> TrajectorySetpoint (NED): the full feedforward p, v, a, yaw, yawspeed.
-    HALF-ASSED: finite velocity/acceleration feedforward has never run in the simulator (no lab
-    example sets it); the position-only fallback is to send cmd.q, cmd.q_yaw and NaN v, a."""
+def fill_trajectory_setpoint(msg, cmd, stamp_us, feedforward=True):
+    """Command (local ENU) -> TrajectorySetpoint (NED).
+    feedforward: p, v, a, yaw, yawspeed. HALF-ASSED: finite velocity/acceleration feedforward had
+    never run in the simulator (no lab example sets it).
+    feedforward=False: what the real drone gets, the lead point q and its yaw, v/a/yawspeed NaN."""
     msg.timestamp = stamp_us
-    msg.position = [float(v) for v in F.enu_to_ned(cmd.p)]
-    msg.velocity = [float(v) for v in F.enu_to_ned(cmd.v)]
-    msg.acceleration = [float(v) for v in F.enu_to_ned(cmd.a)]
-    if cmd.yaw is None:
+    nan3 = [math.nan] * 3
+    if feedforward:
+        msg.position = [float(v) for v in F.enu_to_ned(cmd.p)]
+        msg.velocity = [float(v) for v in F.enu_to_ned(cmd.v)]
+        msg.acceleration = [float(v) for v in F.enu_to_ned(cmd.a)]
+        yaw, yawspeed = cmd.yaw, -float(cmd.yaw_rate)
+    else:
+        msg.position = [float(v) for v in F.enu_to_ned(cmd.q)]
+        msg.velocity, msg.acceleration = nan3, list(nan3)
+        yaw, yawspeed = cmd.q_yaw, math.nan
+    if yaw is None:
         msg.yaw, msg.yawspeed = math.nan, math.nan
     else:
-        msg.yaw, msg.yawspeed = float(F.yaw_enu_to_ned(cmd.yaw)), -float(cmd.yaw_rate)
+        msg.yaw, msg.yawspeed = float(F.yaw_enu_to_ned(yaw)), yawspeed
     return msg
 
 
@@ -146,13 +154,17 @@ class SimAdapter(Node):
         P("pad_y", 0.9144)
         P("pad_heading_deg", 0.0)            # StartHeadingDeg (ASSUMED 0)
         P("max_path_speed_mps", 1.0)
+        P("hold_heading", False)             # True: keep the pad heading for the whole path
+        P("feedforward", True)               # False: position-only lead point, like the real drone
         g = lambda n: self.get_parameter(n).value
         if approved and not g("use_sim_time"):
             raise SystemExit(f"{APPROVAL_FLAG} refused: use_sim_time is false, this is not the simulator")
         self.approved = approved
         cfg = sim_config(approved, pad_xy=(float(g("pad_x")), float(g("pad_y"))),
                          pad_yaw=math.radians(float(g("pad_heading_deg"))),
-                         max_path_speed_mps=float(g("max_path_speed_mps")))
+                         max_path_speed_mps=float(g("max_path_speed_mps")),
+                         hold_heading=bool(g("hold_heading")))
+        self.feedforward = bool(g("feedforward"))
         path = path_to_course(load_path(g("path_file")), cfg.pad_xy, cfg.pad_yaw)
         self.follower = Follower(path, cfg)
         self.state = VehicleState()
@@ -176,6 +188,7 @@ class SimAdapter(Node):
         self.create_timer(1.0 / float(g("rate_hz")), self.tick)
         self.get_logger().info(
             f"path {path.duration:.1f} s, peak {path.speed.max():.2f} m/s, played at x{self.follower.scale:.2f}; "
+            + f"hold_heading {cfg.hold_heading}, feedforward {self.feedforward}; "
             + ("APPROVED: will request Offboard + arm, fly, and land" if approved else
                f"PASSIVE (no {APPROVAL_FLAG}): no publishers, nothing is sent"))
 
@@ -215,13 +228,14 @@ class SimAdapter(Node):
         if now - self.last_log >= 2.0:
             self.last_log = now
             st = self.follower.status()
-            self.get_logger().info(f"{st['mode']}: tau {st['tau']} err {st['err_m']} rate {st['clock_rate']}")
+            self.get_logger().info(f"{st['mode']}: tau {st['tau']} err {st['err_m']} rate {st['clock_rate']} "
+                                   f"est_course {st.get('vehicle_course')}")
         if not self.approved:
             return
         t = self.stamp_us()
         if cmd.publish:
             self.ocm_pub.publish(fill_offboard_mode(OffboardControlMode(), t))
-            self.sp_pub.publish(fill_trajectory_setpoint(TrajectorySetpoint(), cmd, t))
+            self.sp_pub.publish(fill_trajectory_setpoint(TrajectorySetpoint(), cmd, t, self.feedforward))
         if cmd.request_offboard_arm:
             self.cmd_pub.publish(fill_vehicle_command(VehicleCommand(), VehicleCommand.VEHICLE_CMD_DO_SET_MODE, t, 1.0, 6.0))
             self.cmd_pub.publish(fill_vehicle_command(VehicleCommand(), VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, t, 1.0))

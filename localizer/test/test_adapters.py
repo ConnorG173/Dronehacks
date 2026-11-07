@@ -226,3 +226,12 @@ def test_sim_chain_px4_spawn_to_takeoff_setpoint():
     sp = sim.fill_trajectory_setpoint(NS(), cmd, 0)
     assert np.allclose(sp.position, (spawn_ned[0], spawn_ned[1], spawn_ned[2] - 1.0), atol=1e-9)
     assert sp.yaw == pytest.approx(heading)
+
+
+def test_sim_position_only_sends_the_lead_point():
+    cmd = Command("FOLLOW", "", publish=True, p=np.array([1.0, 2.0, 1.0]), v=np.ones(3), a=np.ones(3),
+                  yaw=0.2, yaw_rate=0.3, q=np.array([1.5, 2.5, 1.0]), q_yaw=0.4)
+    sp = sim.fill_trajectory_setpoint(NS(), cmd, 9, feedforward=False)
+    assert np.allclose(sp.position, (2.5, 1.5, -1.0))                       # q in NED
+    assert all(math.isnan(v) for v in list(sp.velocity) + list(sp.acceleration))
+    assert sp.yaw == pytest.approx(F.yaw_enu_to_ned(0.4)) and math.isnan(sp.yawspeed)

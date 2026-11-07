@@ -401,3 +401,16 @@ def test_ready_yaw_only_when_configured(cpath):
     r = Rig(cpath, sim_cfg(ready_commands_yaw=True))
     r.step()
     assert r.step().yaw is not None
+
+
+def test_hold_heading_keeps_pad_heading_for_the_whole_path(cpath):
+    T_true = F.Transform2D(-1.0, 2.0, math.radians(30))
+    r = Rig(cpath, sim_cfg(hold_heading=True), T_true=T_true)
+    r.run_until(lambda c: c.request_offboard_arm)
+    r.s.armed = r.s.offboard = True
+    r.run_until(lambda c: r.f.mode == "FINISH")
+    flying = [c for c in r.cmds if c.mode in ("TAKEOFF", "FOLLOW", "FINISH")]
+    assert len(flying) > 100
+    for c in flying:                                       # course heading 0 = local -T.yaw
+        assert F.wrap(c.yaw + T_true.yaw) == pytest.approx(0, abs=1e-9) and c.yaw_rate == 0.0
+        assert F.wrap(c.q_yaw + T_true.yaw) == pytest.approx(0, abs=1e-9)
