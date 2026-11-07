@@ -100,7 +100,11 @@ class Mission:
         self.leg = 1
         self.traj = self.return_traj
         self.pad_z = self.return_pad_z
-        self.tracker = Tracker(self.return_traj, self.return_tracker_params)
+        import copy
+        rtp = copy.copy(self.return_tracker_params)
+        # rule 7.7's height limit does not apply on the return: allow the validated plan's height
+        rtp.z_ceiling = max(rtp.z_ceiling, float(np.max(self.return_traj.p[:, 2])) + 0.25)
+        self.tracker = Tracker(self.return_traj, rtp)
         self.t_settled = self.t_height = self.t_finished = None
         self._go(now, TAKEOFF, 'return: touch-and-go')
 

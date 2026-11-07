@@ -1,0 +1,38 @@
+# DRAFT return leg for course_v3 (rule 7.10), written by path_following. NOT used in scored runs:
+# a legitimate return needs a re-arm after disarming on the pad (organizer question).
+# Pad centre (course_v3 Goal x/y, on the floor) -> over the 68 in (1.73 m) wall at y ~0.41..0.78 -> launch mark.
+# Crossing box at 2.25 m: >= DilateRadius above the wall top, below the interface 3.0 m and the 3.05 m net.
+# Fly with return_z_ceiling_m >= 2.6.
+MapFile: ../maps/course_v3.bin
+MapBound: [-3.2, 3.2, -3.2, 3.2, 0.0, 3.2]
+VoxelWidth: 0.1
+DilateRadius: 0.3
+StartPos: [-2.0422, -0.7925, 0.0000]
+StartHeadingDeg: 0.0
+HoverHeight: 1.0
+Checkpoint: [-2.4260, 0.5950, 2.2500, 0.2500, 0.2500, 0.1200]   # over the wall, on the pad->launch line
+Goal: [-2.5146, 0.9144, 1.0000]
+TimeoutRRT: 0.5
+CorridorProgress: 7.0
+CorridorRange: 3.0
+MaxVelMag: 4.0
+MaxBdrMag: 2.1
+MaxTiltAngle: 1.05
+MinThrust: 2.0
+MaxThrust: 12.0
+WeightT: 20.0
+ChiVec: [1.0e+4, 1.0e+4, 1.0e+4, 1.0e+4, 1.0e+5]
+SmoothingEps: 1.0e-2
+IntegralIntervs: 16
+RelCostTol: 1.0e-5
+VehicleMass: 0.61
+GravAcc: 9.8
+HorizDrag: 0.70
+VertDrag: 0.80
+ParasDrag: 0.01
+SpeedEps: 0.0001
+OutDir: ../out/course_v3_return
+SampleDt: 0.01
+YawMinSpeed: 0.3
+YawRateMaxDeg: 90.0
+YawSmoothTime: 0.5
