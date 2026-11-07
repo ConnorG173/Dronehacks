@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>team_path_following</name>
+  <version>0.1.0</version>
+  <description>Stanford DroneHacks 2026: run the GCOPTER plan and track it with velocity setpoints through the skybeta flight interface.</description>
+  <maintainer email="jholli@stanford.edu">Stanford DroneHacks team</maintainer>
+  <license>MIT</license>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>diagnostic_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-scipy</exec_depend>
+  <!-- px4_msgs and skybeta_flight_interface are optional at runtime (low-latency velocity, topic names);
+       both come from the skybeta image. Never vendor px4_msgs here. -->
+  <test_depend>python3-pytest</test_depend>
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

@@ -1,0 +1,28 @@
+# mission_tracker parameters. Gains tuned offline in tools/kinsim.py against the fleet's
+# PX4 velocity-loop parameters; re-fit tau_v / t_delay from sim and real logs
+# (tools/fit_lag.py) before trusting them. See docs/results/path_following.md.
+mission_tracker:
+  ros__parameters:
+    control_rate_hz: 50.0
+    speed_margin_mps: 0.1
+    latency_comp_s: 0.06
+    pose_timeout_s: 0.25
+    use_px4_velocity: true
+    clearance_slow_m: 0.0        # 0 = off
+    clearance_stop_m: 0.0
+    tracker.ff_mode: inverse
+    tracker.tau_v: 0.55
+    tracker.t_delay: 0.10
+    tracker.kc: 1.2
+    tracker.ka: 0.6
+    tracker.kz: 1.5
+    tracker.ki: 0.0
+    tracker.e0: 0.10
+    tracker.e_span: 0.30
+    tracker.taudot_max: 1.0
+    tracker.taudot_acc: 1.0
+    tracker.k_yaw: 1.5
+    tracker.yaw_mode: path
+    mission.takeoff_vz: 0.6
+    mission.land_vz: 0.5
+    mission.land_vz_slow: 0.2

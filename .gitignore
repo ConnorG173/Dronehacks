@@ -4,3 +4,7 @@ planner/out/
 # sim: generated course model and run artifacts
 sim/gz/models/dronehacks_course/
 __pycache__/
+
+# path following: planner builds per platform, run artifacts
+planner/build-*/
+path_following/runs/
