@@ -3,6 +3,6 @@
 set -eo pipefail
 source "$(dirname "$0")/common.sh"
 if [[ "${1:-}" == "--host" ]]; then
-  exec bash --rcfile <(echo "source ~/.bashrc; source /opt/ros/humble/setup.bash; export ROS_DOMAIN_ID=$ROS_DOMAIN_ID GZ_PARTITION=$GZ_PARTITION; PS1='[sim$SIM_ID host] \w\$ '")
+  exec bash --rcfile <(echo "source ~/.bashrc; source /opt/ros/humble/setup.bash; export ROS_DOMAIN_ID=$ROS_DOMAIN_ID GZ_PARTITION=$GZ_PARTITION FASTRTPS_DEFAULT_PROFILES_FILE=$FASTRTPS_DEFAULT_PROFILES_FILE; PS1='[sim$SIM_ID host] \w\$ '")
 fi
-exec docker exec -it -e ROS_DOMAIN_ID="$ROS_DOMAIN_ID" "$CONTAINER" bash -lc "source /opt/ros/humble/setup.bash && source /root/skybeta_ws/install/setup.bash && cd /root/team && exec bash"
+exec docker exec -it -e ROS_DOMAIN_ID="$ROS_DOMAIN_ID" -e FASTRTPS_DEFAULT_PROFILES_FILE=/root/team/sim/dds/fastdds_udp.xml "$CONTAINER" bash -lc "source /opt/ros/humble/setup.bash && source /root/skybeta_ws/install/setup.bash && cd /root/team && exec bash"

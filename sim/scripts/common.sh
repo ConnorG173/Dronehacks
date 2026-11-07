@@ -13,6 +13,7 @@ POSE="${POSE:--2.5146,0.9144,0.25,0,0,0}"
 
 export ROS_DOMAIN_ID="$((10 + SIM_ID))"
 export GZ_PARTITION="sim${SIM_ID}"
+export FASTRTPS_DEFAULT_PROFILES_FILE="$REPO/sim/dds/fastdds_udp.xml"   # see that file: no SHM across the container boundary
 XRCE_PORT="$((8888 + SIM_ID))"
 MAV_PORT="$((18570 + SIM_ID))"          # PX4's GCS link for this instance (sim/pilot.py talks here)
 FOXGLOVE_PORT="$((8765 + SIM_ID))"
