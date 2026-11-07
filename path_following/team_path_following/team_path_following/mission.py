@@ -24,6 +24,7 @@ FLYING = (TAKEOFF, COURSE, LANDING, LANDED)
 class MissionParams:
     takeoff_vz: float = 1.0        # m/s max climb
     takeoff_vxy: float = 0.3       # m/s max horizontal correction during takeoff
+    takeoff_kz: float = 2.5        # 1/s climb gain: stay at takeoff_vz until close (Gazebo: 1.2 took 8.5 s)
     settle_tol: float = 0.12       # m position error to call the hover settled
     settle_speed: float = 0.15     # m/s
     settle_time: float = 0.3       # s inside tolerance before the course starts
@@ -141,7 +142,7 @@ class Mission:
         p = self.p
 
         if self.state == TAKEOFF:
-            v = hold_velocity(pos, hover, kp=1.2, v_xy_max=p.takeoff_vxy, v_z_max=p.takeoff_vz)
+            v = hold_velocity(pos, hover, kp=1.2, v_xy_max=p.takeoff_vxy, v_z_max=p.takeoff_vz, kp_z=p.takeoff_kz)
             yr = self._yaw_hold(yaw, self.traj.yaw[0])
             err = float(np.linalg.norm(hover - pos))
             if abs(hover[2] - pos[2]) < p.settle_tol and self.t_height is None:

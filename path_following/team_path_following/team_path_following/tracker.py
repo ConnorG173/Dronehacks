@@ -156,10 +156,12 @@ class Tracker:
         return v_cmd, yaw_rate
 
 
-def hold_velocity(pos, target, kp=1.0, v_xy_max=0.5, v_z_max=0.6):
+def hold_velocity(pos, target, kp=1.0, v_xy_max=0.5, v_z_max=0.6, kp_z=None):
     """Simple point-hold law for takeoff/landing phases."""
     e = np.asarray(target, float) - np.asarray(pos, float)
     v = kp * e
+    if kp_z is not None:
+        v[2] = kp_z * e[2]
     v[:2] = _cap_norm(v[:2], v_xy_max)
     v[2] = min(max(v[2], -v_z_max), v_z_max)
     return v
