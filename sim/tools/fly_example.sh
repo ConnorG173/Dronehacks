@@ -8,7 +8,7 @@ tmux kill-window -t "$TMUX_SESSION:competitor" 2>/dev/null || true
 tmux new-window -t "$TMUX_SESSION" -n competitor "SIM_ID=$SIM_ID bash $REPO/sim/scripts/competitor.sh; bash"
 sleep 12
 echo "--- pilot go"
-timeout 150 python3 "$REPO/sim/pilot.py" --sim "$SIM_ID" go
+timeout 260 python3 "$REPO/sim/pilot.py" --sim "$SIM_ID" go
 python3 - "$DUR" <<'EOF'
 import sys, time, threading, rclpy
 from rclpy.node import Node

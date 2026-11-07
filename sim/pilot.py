@@ -81,8 +81,13 @@ def main():
     elif what == "go":
         if not wait_position_valid(m):
             sys.exit("EKF never reported a valid position: is cuVSLAM tracking and the bridge running?")
-        if not command(m, mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM, 1):
-            sys.exit("arming refused (see PX4 console)")
+        # Preflight checks flap for a few seconds after start (accel bias, position stability), so retry
+        # like a pilot would: every 2 s for up to 90 s.
+        t0 = time.time()
+        while not command(m, mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM, 1):
+            if time.time() - t0 > 90:
+                sys.exit("arming refused for 90 s (see: SIM_ID=N bash sim/tools/px4_cmd.sh commander check)")
+            time.sleep(2)
         time.sleep(0.5)
         set_px4_mode(m, PX4_MAIN_MODE["position"])
         status(m)
