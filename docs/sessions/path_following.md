@@ -26,7 +26,7 @@ pos/vel/acc rows cannot be passed through as they are:
 Do this instead: look up the path row for "now", and publish a **velocity** setpoint =
 path velocity (feedforward) + gains × position error, from odometry at full rate. Raise the interface's
 `setpoint_rate_hz` (30–50) and `max_speed_mps` only as far as tracking and VIO hold up.
-Two frame conversions on the way: planner NED → `map` ENU, then `map` → `odom` ENU with the latest
+Two frame conversions on the way: planner NED → `course` ENU, then `course` → cuVSLAM `odom` ENU with the latest
 localization correction (contracts).
 
 Note: the organizers' cloud lab code (`refnav/`) publishes `/fmu/in/trajectory_setpoint` directly with full
@@ -78,7 +78,7 @@ Keep a results table in `docs/results/path_following.md`.
 > You are the path streaming + path following workstream for our Stanford DroneHacks 2026 team.
 > Read `docs/CONTRACTS.md`, `docs/sessions/path_following.md`, `planner/README.md` and `docs/SIM.md`.
 > Build a ROS 2 Humble node that runs the existing GCOPTER planner's output (`planner/`, don't rewrite it),
-> converts it to the `map`/`odom` frames, and tracks it by publishing velocity setpoints with feedforward to
+> converts it to the `course`/`odom` frames, and tracks it by publishing velocity setpoints with feedforward to
 > `/skybeta/setpoint/twist` through the organizers' flight interface. Start with the baseline tracker, then
 > an acados MPC. Use the proven open-source libraries in the doc rather than writing solvers from scratch.
 > No course-specific numbers in code. Test every change in the Gazebo sim on the GCP VM (your slot is 0) on the course map and
