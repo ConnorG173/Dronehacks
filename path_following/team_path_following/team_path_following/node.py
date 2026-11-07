@@ -420,11 +420,21 @@ class MissionTracker(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = MissionTracker()
+    # A dead node in flight ends the run (the interface holds, then the pilot lands), so an
+    # executor error (seen once in sim: rclpy take_message RuntimeError) is logged, not fatal.
+    errors = 0
+    while rclpy.ok():
+        try:
+            rclpy.spin(node)
+            break
+        except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
+            break
+        except Exception as exc:  # noqa: BLE001
+            errors += 1
+            node.get_logger().error(f'executor error #{errors}, continuing: {exc!r}')
     try:
-        rclpy.spin(node)
-    except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
-        pass
-    finally:
         node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+    except Exception:  # noqa: BLE001
+        pass
+    if rclpy.ok():
+        rclpy.shutdown()

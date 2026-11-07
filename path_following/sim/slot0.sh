@@ -66,8 +66,32 @@ fly)
   dexec "$CONTAINER" pkill -INT -f "ros2 bag record" || true
   sleep 3
   dexec "$CONTAINER" bash -lc "$IN_C && python3 path_following/tools/eval_bag.py $out/bag $COURSE $out/plan/path.bin \
-    --name '$name' --notes '$mode $*' --append docs/results/path_following.md; python3 path_following/tools/fit_lag.py $out/bag" \
+    --name '$name' --notes '$mode $*' --append $out/results_row.md; python3 path_following/tools/fit_lag.py $out/bag" \
     | tee "$REPO/$out/metrics.txt"
+  ;;
+sysid)
+  # velocity-step flight for fit_lag.py:  sysid <name> <height_m> [amp_mps] [extra sysid_node args]
+  # (above the walls does not work: the rangefinder height reference sees the wall tops)
+  name="${1:?run name}"; height="${2:?height}"; amp="${3:-0.8}"; shift 3 || shift $#
+  out="$RUNS/$name"
+  mkdir -p "$REPO/$out"
+  tmux kill-window -t "$TMUX_SESSION:team" 2>/dev/null || true
+  tmux new-window -d -t "$TMUX_SESSION" -n team \
+    "SIM_ID=0 bash $REPO/sim/scripts/competitor.sh competitor_example competitor.launch.py competitor:=false allow_mode_request:=true 2>&1 | tee $REPO/$out/launch.log; bash"
+  dexec -d "$CONTAINER" bash -lc "$IN_C && python3 path_following/tools/sysid_node.py $COURSE --height $height --amp $amp $* >/root/team/$out/sysid.log 2>&1"
+  dexec -d "$CONTAINER" bash -lc "$IN_C && ros2 bag record -s mcap -o /root/team/$out/bag /sim/ground_truth/odom \
+    /skybeta/setpoint/twist /skybeta/state /team/mission/state /team/tracker/debug /fmu/in/trajectory_setpoint \
+    /fmu/out/vehicle_local_position >/root/team/$out/bag.log 2>&1"
+  sleep 8
+  echo "--- pilot go"
+  timeout 150 python3 "$REPO/sim/pilot.py" --sim 0 go || echo "pilot go failed"
+  ok=0
+  python3 "$REPO/path_following/sim/wait_mission.py" 120 && ok=1
+  if [ "$ok" != 1 ]; then timeout 30 python3 "$REPO/sim/pilot.py" --sim 0 land || true; fi
+  dexec "$CONTAINER" pkill -INT -f "ros2 bag record" || true
+  dexec "$CONTAINER" pkill -INT -f "sysid_node.py" || true
+  sleep 3
+  dexec "$CONTAINER" bash -lc "$IN_C && python3 path_following/tools/fit_lag.py $out/bag --states course" | tee "$REPO/$out/metrics.txt"
   ;;
 reset)
   # fresh world + PX4 (EKF2 restarts itself at 30 s; arm only after ~80 s)

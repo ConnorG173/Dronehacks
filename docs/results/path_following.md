@@ -120,5 +120,26 @@ landing → landed → done.
 
 ## Gazebo slot 0 (`path_following/sim/slot0.sh`)
 
+**Status 13:00 PST: no valid Gazebo tracking result yet, because the sim's VIO is broken.** In slot 0, cuVSLAM
+publishes `/visual_slam/tracking/odometry` at ~25 Hz but its position is exactly (0, 0, 0) for the whole
+flight (`tools/vio_check.py`), so PX4's EKF2 and its velocity loop fly on a wrong estimate. Reported to the
+coordinator. What the runs did establish:
+
+- The chain works end to end: plan at startup (best of 3, ~10 s in the container), zero twists until the
+  pilot's go, Offboard, takeoff, course start (gt02–gt05).
+- The sim drone is an x500: rotors reach 0.39 m from centre. The plan keeps 0.30 m (DilateRadius for our
+  drone) and the 0.93 m maze gaps leave a centred x500 ~7 cm per side, so it clips walls (gt02, gt05 at
+  M1; gt04 near the west net). `DilateRadius` > 0.3 needs `VoxelWidth 0.05` (dilation is in whole voxels);
+  0.35 plans, 0.4 does not (the launch mark is within 0.4 m of a wall). Asked for a Sky Beta-sized
+  collision footprint.
+- Takeoff: Offboard → course start 8.5 s with the takeoff climb gain 1.2, **5.0 s with `takeoff_kz` 2.5**.
+- After a wall strike EKF2 reported −15 m/s while stationary, and the latency compensation moved the
+  node's estimate by 1 m. Fixed: EKF2 velocity is used only while it agrees with the pose velocity, and
+  the prediction is capped (`vel_agree_mps`, 0.15 s, max_speed + 0.5).
+- Flying above the 1.73 m walls (sysid01/02 at 2.4 m) breaks PX4's height: the rangefinder
+  (`EKF2_HGT_REF=2`) sees the wall tops. Relevant for any return over the barrier on the drone.
+- rclpy raised `RuntimeError: Unable to convert call argument` inside the executor once (sysid node,
+  px4_msgs subscription). mission_tracker now logs executor errors and keeps spinning.
+
 | sim | run | result | mission s | course s | plan s | max xt | rms xt | min clear | touches | checkpoints | cp miss | land err | notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|

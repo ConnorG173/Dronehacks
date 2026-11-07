@@ -54,6 +54,7 @@ class SimParams:
     drag: float = 0.25                # 1/s linear drag
     yaw_tau: float = 0.15
     takeoff_ramp_s: float = 3.0       # MPC_TKO_RAMP_T: vertical setpoint ramps in after liftoff
+    ekf_vel_delay_s: float = 0.0      # PX4 controls on a delayed velocity estimate (VIO-derived EKF2)
     link_delay_s: float = 0.02        # DDS + uXRCE to PX4
     # VIO
     odom_hz: float = 30.0
@@ -83,6 +84,7 @@ class Px4Model:
         self.t_landed = 0.0
         self.flew = False
         self.ground_z = float(start_map[2])
+        self._vhist = []
 
     def step(self, dt, v_sp, yaw_rate_sp, t):
         sp = self.sp
@@ -104,13 +106,18 @@ class Px4Model:
         elif getattr(self, 't_takeoff', None) is not None and t - self.t_takeoff < sp.takeoff_ramp_s:
             ramp = (t - self.t_takeoff) / sp.takeoff_ramp_s
             v_sp = np.array([v_sp[0], v_sp[1], v_sp[2] * ramp if v_sp[2] > 0 else v_sp[2]])
-        e = v_sp - self.v
+        self._vhist.append(self.v.copy())
+        nd = int(round(sp.ekf_vel_delay_s / dt))
+        v_est = self._vhist[-1 - nd] if len(self._vhist) > nd else self._vhist[0]
+        if len(self._vhist) > 200:
+            del self._vhist[:100]
+        e = v_sp - v_est
         kp = np.array([sp.xy_p, sp.xy_p, sp.z_p])
         ki = np.array([sp.xy_i, sp.xy_i, sp.z_i])
         self.i += ki * e * dt
         self.i = np.clip(self.i, -3.0, 3.0)
         acc = kp * e + self.i
-        acc[:2] -= sp.xy_d * self.a[:2]
+        acc[:2] -= sp.xy_d * self.a[:2]   # D on the (true) acceleration
         amax = G * math.tan(math.radians(sp.tilt_max_deg))
         n = np.linalg.norm(acc[:2])
         if n > amax:
