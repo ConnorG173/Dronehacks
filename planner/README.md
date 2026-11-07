@@ -14,9 +14,13 @@ planner/
   CMakeLists.txt         Release, -O3 (upstream flags); Eigen3 + OMPL only
   src/main.cpp           the program
   third_party/gcopter/   13 upstream headers (2 documented fixes in geo_utils.hpp); LICENSE; UPSTREAM.md
-  config/course.yaml     inputs (currently the synthetic wall demo)
+  config/course_v3.yaml  the real course (dronehacks-course-v3.step); its path is
+                         ../localizer/data/course_v3_path.bin
+  config/course.yaml     synthetic wall demo (the example used below)
+  maps/course_v3.bin     course map (tools/cad_to_map.py, command in course_v3.yaml)
   maps/wall_demo.bin     demo map (tools/make_wall_map.py)
-  tools/                 laptop-side map tools (Python)
+  tools/cad_to_map.py    CAD -> map file (laptop; numpy + trimesh, STEP needs CadQuery)
+  tools/make_wall_map.py synthetic wall course (also imported by tests/run_tests.py)
   tests/                 upstream parity harness + tests
 ```
 
@@ -39,6 +43,22 @@ cd planner
 cmake -S . -B build            # add -DCMAKE_PREFIX_PATH=/opt/ros/jazzy if OMPL came from ros-jazzy-ompl
 cmake --build build -j
 ```
+
+Windows laptop (for iteration only; it does not count as a target build): MSYS2 UCRT64 g++ +
+Ninja, with eigen3 and boost from pacman and OMPL 1.7.0 built from source into
+`C:\Users\Conno\projects\ompl-1.7.0`. In Git Bash:
+
+```bash
+export PATH=/c/msys64/ucrt64/bin:/c/Users/Conno/projects/ompl-1.7.0/lib:$PATH
+cmake -S . -B build -G Ninja -DCMAKE_PREFIX_PATH="C:/Users/Conno/projects/ompl-1.7.0;C:/msys64/ucrt64"
+cmake --build build -j
+./build/gcopter_planner.exe config/course_v3.yaml     # -> out/course_v3/path.bin
+```
+
+To fly a new plan, copy `out/course_v3/path.bin` over `../localizer/data/course_v3_path.bin`.
+The plan is not reproducible: the RRT stops on a wall-clock limit, so every run gives a slightly
+different path, and some runs fail validation (re-run them). The committed path is the one the
+localizer tests pin (peak speed 2.42 m/s).
 
 ## Run
 
