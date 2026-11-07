@@ -128,6 +128,8 @@ StatusResult evaluate_status(const StatusInputs& in, const StatusParams& p) {
     if (in.sigma_xy_m > p.warn_sigma_xy_m) warn.push_back("sigma_xy high");
     if (in.sigma_yaw_rad > p.warn_sigma_yaw_rad) warn.push_back("sigma_yaw high");
     if (in.moving && (in.fix_age_s < 0 || in.fix_age_s > p.warn_fix_age_s)) warn.push_back("no recent fix");
+    if (in.slew_residual_m > p.warn_slew_residual_m) warn.push_back("correction slewing");
+    if (in.consecutive_rejected > p.warn_consecutive_rejected) warn.push_back("fixes rejected");
   }
 
   if (!err.empty()) {
@@ -164,6 +166,121 @@ std::array<double, 36> pose_covariance(const CovParams& p, double d, double* sxy
   if (sxy) *sxy = s_xy;
   if (syaw) *syaw = s_yaw;
   return c;
+}
+
+// ------------------------------------------------------------------------------------ filter
+void CorrectionFilter::reset() {
+  est_ = Correction4{};
+  P_.setZero();
+  P_(0, 0) = P_(1, 1) = p_.sigma0_xy_m * p_.sigma0_xy_m;
+  P_(2, 2) = p_.sigma0_z_m * p_.sigma0_z_m;
+  P_(3, 3) = p_.sigma0_yaw_rad * p_.sigma0_yaw_rad;
+  rej_.clear();
+}
+
+void CorrectionFilter::predict(double ds, double dt) {
+  ds = std::max(0.0, ds);
+  dt = std::max(0.0, dt);
+  const double qxy = p_.q_xy_per_sqrt_m * p_.q_xy_per_sqrt_m * ds + p_.q_xy_per_sqrt_s * p_.q_xy_per_sqrt_s * dt;
+  P_(0, 0) += qxy;
+  P_(1, 1) += qxy;
+  P_(2, 2) += p_.q_z_per_sqrt_m * p_.q_z_per_sqrt_m * ds;
+  P_(3, 3) += p_.q_yaw_per_sqrt_m * p_.q_yaw_per_sqrt_m * ds + p_.q_yaw_per_sqrt_s * p_.q_yaw_per_sqrt_s * dt;
+}
+
+Correction4 CorrectionFilter::implied(const Iso3& q, const Vec3& z) const {
+  Correction4 c;
+  c.yaw = wrap_pi(z.z() - yaw_of(q.linear()));
+  const Vec3 rq = rot_z(c.yaw) * q.translation();
+  c.t = Vec3(z.x() - rq.x(), z.y() - rq.y(), est_.t.z());
+  return c;
+}
+
+CorrectionFilter::Result CorrectionFilter::update(const Iso3& q, const Vec3& z, const Mat3& R, double* d2_out) {
+  if (!z.allFinite() || !R.allFinite()) return Result::Invalid;
+  const double c = std::cos(est_.yaw), s = std::sin(est_.yaw);
+  const Vec3 qp = q.translation();
+  // Prediction h(C) = (Rz(yaw) q_xy + t_xy, yaw_q + yaw).
+  const double hx = c * qp.x() - s * qp.y() + est_.t.x();
+  const double hy = s * qp.x() + c * qp.y() + est_.t.y();
+  const double hyaw = wrap_pi(yaw_of(q.linear()) + est_.yaw);
+  Eigen::Matrix<double, 3, 4> H = Eigen::Matrix<double, 3, 4>::Zero();
+  H(0, 0) = 1;
+  H(1, 1) = 1;
+  H(0, 3) = -s * qp.x() - c * qp.y();
+  H(1, 3) = c * qp.x() - s * qp.y();
+  H(2, 3) = 1;
+  Vec3 nu(z.x() - hx, z.y() - hy, wrap_pi(z.z() - hyaw));
+  const Mat3 S = H * P_ * H.transpose() + R;
+  const double d2 = nu.dot(S.ldlt().solve(nu));
+  if (d2_out) *d2_out = d2;
+
+  if (d2 > p_.max_mahal * p_.max_mahal) {
+    ++n_rej_;
+    rej_.push_back(implied(q, z));
+    while (static_cast<int>(rej_.size()) > p_.reacq_n) rej_.pop_front();
+    if (static_cast<int>(rej_.size()) == p_.reacq_n) {
+      // Re-acquire if the rejected fixes agree with each other: VIO jumped or drifted beyond the gate.
+      Vec3 mt = Vec3::Zero();
+      double sy = 0, cy = 0;
+      for (const auto& r : rej_) {
+        mt += r.t;
+        sy += std::sin(r.yaw);
+        cy += std::cos(r.yaw);
+      }
+      mt /= rej_.size();
+      const double my = std::atan2(sy, cy);
+      double max_dxy = 0, max_dyaw = 0;
+      for (const auto& r : rej_) {
+        max_dxy = std::max(max_dxy, std::hypot(r.t.x() - mt.x(), r.t.y() - mt.y()));
+        max_dyaw = std::max(max_dyaw, std::abs(wrap_pi(r.yaw - my)));
+      }
+      if (max_dxy < p_.reacq_xy_m && max_dyaw < p_.reacq_yaw_rad) {
+        est_.t.x() = mt.x();
+        est_.t.y() = mt.y();
+        est_.yaw = my;
+        const double vxy = std::max(R(0, 0), R(1, 1)) + max_dxy * max_dxy;
+        P_(0, 0) = P_(1, 1) = std::max(vxy, p_.sigma0_xy_m * p_.sigma0_xy_m);
+        P_(0, 1) = P_(1, 0) = 0;
+        P_(0, 3) = P_(3, 0) = P_(1, 3) = P_(3, 1) = 0;
+        P_(3, 3) = std::max(R(2, 2) + max_dyaw * max_dyaw, p_.sigma0_yaw_rad * p_.sigma0_yaw_rad);
+        rej_.clear();
+        ++n_reacq_;
+        return Result::Reacquired;
+      }
+    }
+    return Result::Rejected;
+  }
+
+  const Eigen::Matrix<double, 4, 3> K = P_ * H.transpose() * S.inverse();
+  const Eigen::Vector4d dx = K * nu;
+  est_.t.x() += dx(0);
+  est_.t.y() += dx(1);
+  est_.t.z() += dx(2);
+  est_.yaw = wrap_pi(est_.yaw + dx(3));
+  const Mat4 I_KH = Mat4::Identity() - K * H;
+  P_ = I_KH * P_ * I_KH.transpose() + K * R * K.transpose();  // Joseph form
+  rej_.clear();
+  ++n_acc_;
+  return Result::Accepted;
+}
+
+void CorrectionFilter::slew(Correction4& a, double dt) const {
+  dt = std::max(0.0, dt);
+  const Vec3 d = est_.t - a.t;
+  const double n = d.norm(), lim = p_.slew_mps * dt;
+  a.t += (n > lim && n > 0) ? Vec3(d * (lim / n)) : d;
+  const double dy = wrap_pi(est_.yaw - a.yaw), ly = p_.slew_radps * dt;
+  a.yaw = wrap_pi(a.yaw + std::clamp(dy, -ly, ly));
+}
+
+CorrectionFilter::Mat4 CorrectionFilter::pose_cov(const Iso3& q) const {
+  const double c = std::cos(est_.yaw), s = std::sin(est_.yaw);
+  const Vec3 qp = q.translation();
+  Mat4 J = Mat4::Identity();
+  J(0, 3) = -s * qp.x() - c * qp.y();
+  J(1, 3) = c * qp.x() - s * qp.y();
+  return J * P_ * J.transpose();
 }
 
 }  // namespace team_loc

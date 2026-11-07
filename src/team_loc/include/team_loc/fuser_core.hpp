@@ -107,6 +107,8 @@ struct StatusParams {
   double warn_sigma_yaw_rad = 5.0 * M_PI / 180.0;
   double error_sigma_xy_m = 0.5;
   double warn_fix_age_s = 5.0;
+  double warn_slew_residual_m = 0.10;
+  int warn_consecutive_rejected = 3;
 };
 
 struct StatusInputs {
@@ -120,6 +122,8 @@ struct StatusInputs {
   double sigma_xy_m = 0, sigma_yaw_rad = 0;
   double fix_age_s = -1;           // -1 = no fix ever (only checked with correction enabled)
   bool moving = false;
+  double slew_residual_m = 0;      // estimated minus applied correction (correction enabled only)
+  int consecutive_rejected = 0;
 };
 
 struct StatusResult {
@@ -144,5 +148,62 @@ struct CovParams {
 
 std::array<double, 36> pose_covariance(const CovParams& p, double dist_m,
                                        double* sigma_xy = nullptr, double* sigma_yaw = nullptr);
+
+// ---------------------------------------------------------------------------------------------
+// EKF on the 4-DOF correction C = (t, yaw), applied on the left of the anchor A:
+//   T_course_base = C * A * T_odom_base.
+// The state is a slowly varying offset, so a fix stamped at the image time (100-300 ms old) can be
+// applied to the current state without replaying VIO: the correction barely changes over that
+// interval (process noise only). Fixes measure (x, y, yaw) of base_link in the course frame.
+struct FilterParams {
+  double sigma0_xy_m = 0.05, sigma0_z_m = 0.03, sigma0_yaw_rad = 2.0 * M_PI / 180.0;
+  double q_xy_per_sqrt_m = 0.04;                    // random-walk growth with distance flown
+  double q_z_per_sqrt_m = 0.02;
+  double q_yaw_per_sqrt_m = 1.0 * M_PI / 180.0;
+  double q_xy_per_sqrt_s = 0.005;                   // and with time
+  double q_yaw_per_sqrt_s = 0.1 * M_PI / 180.0;
+  double max_mahal = 3.5;                           // 3-dof gate (chi^2 12.25)
+  int reacq_n = 3;                                  // consecutive rejected fixes that agree...
+  double reacq_xy_m = 0.15;                         // ...within this of their mean
+  double reacq_yaw_rad = 5.0 * M_PI / 180.0;
+  double slew_mps = 0.20;                           // applied correction rate limits
+  double slew_radps = 5.0 * M_PI / 180.0;
+};
+
+class CorrectionFilter {
+ public:
+  enum class Result { Accepted, Rejected, Reacquired, Invalid };
+  using Mat4 = Eigen::Matrix4d;
+
+  explicit CorrectionFilter(const FilterParams& p) : p_(p) { reset(); }
+
+  void reset();
+  void predict(double ds_m, double dt_s);
+  // q = A * T_odom_base(t_fix): the anchor-only course pose at the fix stamp.
+  // z = (x, y, yaw) measured; R = its 3x3 covariance. d2_out = Mahalanobis^2 of the innovation.
+  Result update(const Iso3& q, const Vec3& z, const Mat3& R, double* d2_out = nullptr);
+  // Move `applied` toward the estimate by at most the slew limits over dt.
+  void slew(Correction4& applied, double dt_s) const;
+
+  // Covariance (x, y, z, yaw) of the course pose C * q for a current anchor-only pose q.
+  Mat4 pose_cov(const Iso3& q) const;
+
+  const Correction4& est() const { return est_; }
+  const Mat4& P() const { return P_; }
+  int accepted() const { return n_acc_; }
+  int rejected() const { return n_rej_; }
+  int consecutive_rejected() const { return static_cast<int>(rej_.size()); }
+  int reacquired() const { return n_reacq_; }
+
+ private:
+  // The correction that would make the fix exact: (t, yaw) with z = C * q.
+  Correction4 implied(const Iso3& q, const Vec3& z) const;
+
+  FilterParams p_;
+  Correction4 est_;
+  Mat4 P_ = Mat4::Identity();
+  std::deque<Correction4> rej_;
+  int n_acc_ = 0, n_rej_ = 0, n_reacq_ = 0;
+};
 
 }  // namespace team_loc

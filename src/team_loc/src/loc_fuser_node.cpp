@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <deque>
 #include <iomanip>
 #include <memory>
 #include <sstream>
@@ -94,6 +95,21 @@ class LocFuser : public rclcpp::Node {
     cp_.drift_frac = declare_parameter<double>("drift_frac", cp_.drift_frac);
     cp_.drift_yaw_rad_per_m = declare_parameter<double>("drift_yaw_deg_per_m", 0.5) * M_PI / 180.0;
 
+    FilterParams fp;
+    fp.q_xy_per_sqrt_m = declare_parameter<double>("q_xy_per_sqrt_m", fp.q_xy_per_sqrt_m);
+    fp.q_yaw_per_sqrt_m = declare_parameter<double>("q_yaw_deg_per_sqrt_m", 1.0) * M_PI / 180.0;
+    fp.max_mahal = declare_parameter<double>("fix_max_mahal", fp.max_mahal);
+    fp.reacq_n = declare_parameter<int>("reacq_n", fp.reacq_n);
+    fp.reacq_xy_m = declare_parameter<double>("reacq_xy_m", fp.reacq_xy_m);
+    fp.slew_mps = declare_parameter<double>("slew_mps", fp.slew_mps);
+    fp.slew_radps = declare_parameter<double>("slew_deg_per_s", 5.0) * M_PI / 180.0;
+    fp.sigma0_xy_m = cp_.sigma_xy0_m;
+    fp.sigma0_z_m = cp_.sigma_z0_m;
+    fp.sigma0_yaw_rad = cp_.sigma_yaw0_rad;
+    filter_ = std::make_unique<CorrectionFilter>(fp);
+    vio_floor_xy_m_ = declare_parameter<double>("vio_floor_xy_m", 0.02);
+    max_fix_lag_s_ = declare_parameter<double>("max_fix_lag_s", 1.0);
+
     correction_enabled_ = declare_parameter<bool>("enable_correction", false);
     publish_tf_ = declare_parameter<bool>("publish_tf", true);
     course_frame_ = declare_parameter<std::string>("course_frame", "course");
@@ -109,6 +125,7 @@ class LocFuser : public rclcpp::Node {
     const auto t_out = declare_parameter<std::string>("odom_map_topic", "/team/odom_map");
     const auto t_status = declare_parameter<std::string>("status_topic", "/team/loc/status");
     const auto t_corr = declare_parameter<std::string>("correction_topic", "/team/loc/correction");
+    const auto t_fix = declare_parameter<std::string>("fix_topic", "/team/loc/fix");
 
     // ---- I/O
     const auto sensor_qos = rclcpp::SensorDataQoS().keep_last(5);
@@ -121,6 +138,8 @@ class LocFuser : public rclcpp::Node {
 
     sub_odom_ = create_subscription<nav_msgs::msg::Odometry>(
         t_odom, sensor_qos, [this](nav_msgs::msg::Odometry::ConstSharedPtr m) { on_odom(*m); });
+    sub_fix_ = create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
+        t_fix, rclcpp::QoS(10), [this](geometry_msgs::msg::PoseWithCovarianceStamped::ConstSharedPtr m) { on_fix(*m); });
     sub_vo_ = create_subscription<isaac_ros_visual_slam_interfaces::msg::VisualSlamStatus>(
         t_vo, sensor_qos, [this](isaac_ros_visual_slam_interfaces::msg::VisualSlamStatus::ConstSharedPtr m) {
           vo_state_ = m->vo_state;
@@ -170,12 +189,54 @@ class LocFuser : public rclcpp::Node {
       if (!was_anchored)
         RCLCPP_INFO(get_logger(), "anchored on the pad (tilt from %s)", anchor_.tilt_source().c_str());
     }
+    const double ts = stamp_s(m.header.stamp);
+    if (!odom_buf_.empty() && ts < odom_buf_.back().first - 1.0) odom_buf_.clear();  // time went back
+    if (odom_buf_.empty() || ts > odom_buf_.back().first) odom_buf_.emplace_back(ts, T_odom_base);
+    while (!odom_buf_.empty() && ts - odom_buf_.front().first > 3.0) odom_buf_.pop_front();
     if (!anchor_.anchored()) return;  // nothing trustworthy to publish yet
+
+    // The correction only runs in flight. On the pad the anchor is the truth: reset it.
+    const bool flying = anchor_.state() == AnchorTracker::State::Frozen;
+    if (!flying) {
+      filter_->reset();
+      applied_correction_ = Correction4{};
+    } else if (correction_enabled_ && have_prev_) {
+      const double ds = (T_odom_base.translation() - prev_odom_.translation()).norm();
+      const double dt = ts - prev_stamp_;
+      if (dt > 0 && !vio_.jump_latched()) {
+        filter_->predict(ds, dt);
+        filter_->slew(applied_correction_, dt);
+      }
+    }
+    prev_odom_ = T_odom_base;
+    prev_stamp_ = ts;
+    have_prev_ = true;
 
     const Iso3 T_course_odom = applied_correction_.iso() * anchor_.T_course_odom();
     const Iso3 T_course_base = T_course_odom * T_odom_base;
     const double dist = vio_.path_length() - path_at_anchor_;
-    const auto cov = pose_covariance(cp_, dist, &sigma_xy_, &sigma_yaw_);
+    std::array<double, 36> cov = pose_covariance(cp_, dist, &sigma_xy_, &sigma_yaw_);
+    if (correction_enabled_) {
+      // Filter covariance at this pose + what the slew has not applied yet + a short-term VIO floor.
+      const Iso3 q = anchor_.T_course_odom() * T_odom_base;
+      const auto C = filter_->pose_cov(q);
+      const Vec3 res_t = filter_->est().t - applied_correction_.t;
+      const double res_yaw = wrap_pi(filter_->est().yaw - applied_correction_.yaw);
+      const double fl = vio_floor_xy_m_ * vio_floor_xy_m_;
+      cov.fill(0.0);
+      cov[0] = C(0, 0) + res_t.x() * res_t.x() + fl;
+      cov[1] = cov[6] = C(0, 1);
+      cov[7] = C(1, 1) + res_t.y() * res_t.y() + fl;
+      cov[14] = C(2, 2) + res_t.z() * res_t.z() + fl;
+      cov[21] = cov[28] = cp_.sigma_rp_rad * cp_.sigma_rp_rad;
+      cov[35] = C(3, 3) + res_yaw * res_yaw;
+      cov[5] = cov[30] = C(0, 3);
+      cov[11] = cov[31] = C(1, 3);
+      const double a = cov[0], b = cov[1], d = cov[7];
+      sigma_xy_ = std::sqrt(0.5 * (a + d) + std::sqrt(0.25 * (a - d) * (a - d) + b * b));  // major axis
+      sigma_yaw_ = std::sqrt(cov[35]);
+      slew_residual_m_ = std::hypot(res_t.x(), res_t.y());
+    }
 
     nav_msgs::msg::Odometry out;
     out.header.stamp = m.header.stamp;
@@ -198,6 +259,59 @@ class LocFuser : public rclcpp::Node {
     const double us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0).count();
     proc_us_.push_back(us);
     if (proc_us_.size() > 300) proc_us_.erase(proc_us_.begin());
+  }
+
+  // T_odom_base at stamp t, interpolated from the VIO buffer (false if outside it).
+  bool odom_at(double t, Iso3& out) const {
+    if (odom_buf_.size() < 2 || t < odom_buf_.front().first || t > odom_buf_.back().first + 0.05) return false;
+    if (t >= odom_buf_.back().first) {
+      out = odom_buf_.back().second;
+      return true;
+    }
+    auto hi = std::lower_bound(odom_buf_.begin(), odom_buf_.end(), t,
+                               [](const auto& e, double v) { return e.first < v; });
+    if (hi == odom_buf_.begin()) {
+      out = hi->second;
+      return true;
+    }
+    auto lo = hi - 1;
+    const double span = hi->first - lo->first;
+    if (span > 0.2) return false;
+    const double f = span > 0 ? (t - lo->first) / span : 0.0;
+    out = Iso3::Identity();
+    out.translation() = (1 - f) * lo->second.translation() + f * hi->second.translation();
+    out.linear() = Quat(lo->second.linear()).slerp(f, Quat(hi->second.linear())).toRotationMatrix();
+    return true;
+  }
+
+  void on_fix(const geometry_msgs::msg::PoseWithCovarianceStamped& m) {
+    ++n_fix_in_;
+    if (!correction_enabled_ || anchor_.state() != AnchorTracker::State::Frozen || vio_.jump_latched()) return;
+    const double t = stamp_s(m.header.stamp);
+    if (!odom_buf_.empty() && odom_buf_.back().first - t > max_fix_lag_s_) {
+      ++n_fix_stale_;
+      return;
+    }
+    Iso3 T_odom_base;
+    if (!odom_at(t, T_odom_base)) {
+      ++n_fix_stale_;
+      return;
+    }
+    const Iso3 q = anchor_.T_course_odom() * T_odom_base;
+    const auto& o = m.pose.pose.orientation;
+    const double yaw = std::atan2(2 * (o.w * o.z + o.x * o.y), 1 - 2 * (o.y * o.y + o.z * o.z));
+    const Vec3 z(m.pose.pose.position.x, m.pose.pose.position.y, yaw);
+    const auto& c = m.pose.covariance;
+    Mat3 R;
+    R << c[0], c[1], c[5], c[6], c[7], c[11], c[30], c[31], c[35];
+    double d2 = 0;
+    const auto r = filter_->update(q, z, R, &d2);
+    last_fix_d2_ = d2;
+    if (r == CorrectionFilter::Result::Accepted || r == CorrectionFilter::Result::Reacquired)
+      t_last_fix_ = now_s();
+    if (r == CorrectionFilter::Result::Reacquired)
+      RCLCPP_WARN(get_logger(), "re-acquired from %d consistent rejected fixes: correction (%.2f, %.2f) m, %.1f deg",
+                  3, filter_->est().t.x(), filter_->est().t.y(), filter_->est().yaw * 180.0 / M_PI);
   }
 
   void publish_tf(const builtin_interfaces::msg::Time& stamp, const Iso3& T_course_odom) {
@@ -234,7 +348,10 @@ class LocFuser : public rclcpp::Node {
     in.correction_enabled = correction_enabled_;
     in.sigma_xy_m = sigma_xy_;
     in.sigma_yaw_rad = sigma_yaw_;
-    in.moving = vio_.speed() > 0.1;
+    in.moving = vio_.speed() > 0.1 && anchor_.state() == AnchorTracker::State::Frozen;
+    in.fix_age_s = t_last_fix_ < 0 ? -1.0 : t - t_last_fix_;
+    in.slew_residual_m = slew_residual_m_;
+    in.consecutive_rejected = filter_->consecutive_rejected();
     const StatusResult r = evaluate_status(in, sp_);
 
     diagnostic_msgs::msg::DiagnosticStatus s;
@@ -261,6 +378,20 @@ class LocFuser : public rclcpp::Node {
     kv("sigma_xy_m", fmt(sigma_xy_));
     kv("sigma_yaw_deg", fmt(sigma_yaw_ * 180.0 / M_PI, 2));
     kv("correction_enabled", correction_enabled_ ? "true" : "false");
+    if (correction_enabled_) {
+      kv("fix_age_s", in.fix_age_s < 0 ? "never" : fmt(in.fix_age_s, 2));
+      kv("fixes_in", std::to_string(n_fix_in_));
+      kv("fixes_accepted", std::to_string(filter_->accepted()));
+      kv("fixes_rejected", std::to_string(filter_->rejected()));
+      kv("fixes_stale", std::to_string(n_fix_stale_));
+      kv("reacquired", std::to_string(filter_->reacquired()));
+      kv("last_fix_mahal", fmt(std::sqrt(last_fix_d2_), 2));
+      kv("corr_est_xy_yaw", fmt(filter_->est().t.x()) + " " + fmt(filter_->est().t.y()) + " " +
+                                fmt(filter_->est().yaw * 180.0 / M_PI, 2));
+      kv("corr_applied_xy_yaw", fmt(applied_correction_.t.x()) + " " + fmt(applied_correction_.t.y()) + " " +
+                                    fmt(applied_correction_.yaw * 180.0 / M_PI, 2));
+      kv("slew_residual_m", fmt(slew_residual_m_));
+    }
     kv("map_odom_tf", tf_child_frame_ == odom_frame_ ? "unused" : (map_odom_tf_ok_ ? "ok" : "missing"));
     if (!proc_us_.empty()) {
       std::vector<double> v = proc_us_;
@@ -275,7 +406,15 @@ class LocFuser : public rclcpp::Node {
   VioMonitor vio_;
   StatusParams sp_;
   CovParams cp_;
-  Correction4 applied_correction_;  // identity until milestone 3
+  Correction4 applied_correction_;  // slews toward filter_->est()
+  std::unique_ptr<CorrectionFilter> filter_;
+  std::deque<std::pair<double, Iso3>> odom_buf_;
+  Iso3 prev_odom_ = Iso3::Identity();
+  double prev_stamp_ = 0, t_last_fix_ = -1, last_fix_d2_ = 0, vio_floor_xy_m_ = 0.02, max_fix_lag_s_ = 1.0;
+  double slew_residual_m_ = 0;
+  bool have_prev_ = false;
+  long n_fix_in_ = 0, n_fix_stale_ = 0;
+  rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr sub_fix_;
   bool correction_enabled_ = false, publish_tf_ = true, armed_ = false, map_odom_tf_ok_ = false;
   std::string course_frame_, tf_child_frame_, odom_frame_;
   int vo_state_ = -1;

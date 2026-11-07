@@ -28,3 +28,14 @@ loc_fuser:
     error_sigma_xy_m: 0.5
     warn_sigma_yaw_deg: 5.0
     warn_fix_age_s: 5.0
+    # correction filter (milestone 3; active only with enable_correction)
+    fix_topic: /team/loc/fix
+    q_xy_per_sqrt_m: 0.04        # correction random walk per sqrt(m) flown
+    q_yaw_deg_per_sqrt_m: 1.0
+    fix_max_mahal: 3.5           # 3-dof gate
+    reacq_n: 3                   # consecutive consistent rejections -> re-acquire
+    reacq_xy_m: 0.15
+    slew_mps: 0.20               # applied correction never steps
+    slew_deg_per_s: 5.0
+    vio_floor_xy_m: 0.02
+    max_fix_lag_s: 1.0

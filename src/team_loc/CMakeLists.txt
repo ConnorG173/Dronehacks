@@ -37,7 +37,8 @@ install(DIRECTORY launch config DESTINATION share/${PROJECT_NAME})
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   ament_add_gtest(test_team_loc test/test_pose_math.cpp test/test_course_config.cpp
-    test/test_fuser_core.cpp)
+    test/test_fuser_core.cpp
+    test/test_filter.cpp)
   target_link_libraries(test_team_loc team_loc_core)
   target_compile_definitions(test_team_loc PRIVATE
     COURSE_CONFIG_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../../planner/config/course_v3.yaml")

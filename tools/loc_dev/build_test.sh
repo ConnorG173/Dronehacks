@@ -12,7 +12,7 @@
 set -euo pipefail
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
 CACHE=${TEAM_LOC_DEV_CACHE:-$HOME/.cache/team_loc_dev}
-IMAGE=${TEAM_LOC_DEV_IMAGE:-ros:humble-ros-base}
+IMAGE=${TEAM_LOC_DEV_IMAGE:-team-loc-dev:humble}
 mkdir -p "$CACHE/deps_src"
 
 if [ ! -d "$CACHE/deps_src/px4_msgs" ]; then
