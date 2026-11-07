@@ -21,7 +21,8 @@ for _ in $(seq 1 20); do
 done
 for p in "${PATTERNS[@]}"; do pkill -9 -f "$p" 2>/dev/null || true; done
 if [[ "${2:-}" == "stop" ]]; then echo "sim $SIM_ID stopped"; exit 0; fi
-if [[ ! -f "$REPO/sim/gz/models/dronehacks_course/model.sdf" ]]; then
+CM="$REPO/sim/gz/models/dronehacks_course/model.sdf"
+if [[ ! -f "$CM" || "$REPO/sim/tools/step_to_gz.py" -nt "$CM" ]]; then   # regenerate when the converter changed
   echo "generating course model for this checkout ..."
   "$HOME/.venvs/simtools/bin/python" "$REPO/sim/tools/step_to_gz.py" "$REPO/dronehacks-course-v3.step" \
     --out "$REPO/sim/gz/models/dronehacks_course" | tail -1
