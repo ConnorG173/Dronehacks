@@ -295,7 +295,7 @@ class Follower:
                               c.max_pad_offset_m, c.max_pad_yaw_deg, c.max_tilt_diff_deg)
             self.reason = why
             if T is not None:
-                # HALF-ASSED: T is fixed from here on. No course_matcher fixes are fused, so drift
+                # HALF-ASSED: T is fixed from here on. No localisation fixes are fused, so drift
                 # of the local estimate goes uncorrected. The wide pad registration is not done.
                 self.T = T
                 self.z0 = float(s.pos[2]) if c.z_from_pad else 0.0
