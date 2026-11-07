@@ -91,7 +91,7 @@
     <!-- Ground truth for evaluation only. Topic names deliberately avoid /model/<name>/odometry_with_covariance,
          which PX4's gz_bridge would feed to EKF2 as perfect external vision. -->
     <plugin filename="gz-sim-odometry-publisher-system" name="gz::sim::systems::OdometryPublisher">
-      <odom_frame>map</odom_frame>
+      <odom_frame>course</odom_frame>  <!-- ground truth is in our course frame (cuVSLAM owns "map") -->
       <robot_base_frame>base_link</robot_base_frame>
       <odom_topic>/sim/ground_truth/odom</odom_topic>
       <odom_covariance_topic>/sim/ground_truth/odom_with_covariance</odom_covariance_topic>
