@@ -22,13 +22,17 @@ def load_bag(path):
     import rosbag2_py
     from rclpy.serialization import deserialize_message
     from std_msgs.msg import Float64MultiArray
-    reader = rosbag2_py.SequentialReader()
-    fmt = 'mcap' if path.endswith('.mcap') or 'mcap' in path else 'sqlite3'
-    try:
-        reader.open(rosbag2_py.StorageOptions(uri=path, storage_id=fmt), rosbag2_py.ConverterOptions('', ''))
-    except Exception:
-        reader.open(rosbag2_py.StorageOptions(uri=path, storage_id='sqlite3' if fmt == 'mcap' else 'mcap'),
-                    rosbag2_py.ConverterOptions('', ''))
+    reader = None
+    for sid in ('mcap', 'sqlite3'):
+        try:
+            r = rosbag2_py.SequentialReader()
+            r.open(rosbag2_py.StorageOptions(uri=path, storage_id=sid), rosbag2_py.ConverterOptions('', ''))
+            reader = r
+            break
+        except Exception:  # noqa: BLE001
+            continue
+    if reader is None:
+        sys.exit(f'cannot open bag {path}')
     rows, labels = [], None
     while reader.has_next():
         topic, data, _ = reader.read_next()
@@ -85,6 +89,8 @@ def main():
     ap.add_argument('src')
     ap.add_argument('--states', default='takeoff,course,landing')
     ap.add_argument('--dt', type=float, default=0.02)
+    ap.add_argument('--window', type=float, nargs=2, metavar=('START', 'END'),
+                    help='seconds after the first selected sample (e.g. skip a crash)')
     a = ap.parse_args()
     if a.src.endswith('.npz'):
         z = np.load(a.src)
@@ -94,6 +100,11 @@ def main():
     names = ['idle', 'takeoff', 'course', 'landing', 'landed', 'done', 'abort']
     keep = np.isin(data['state'], [names.index(s) for s in a.states.split(',')])
     keep &= np.all(np.isfinite(data['u']), 1) & np.all(np.isfinite(data['v']), 1)
+    if a.window and keep.any():
+        t0 = data['t'][keep][0]
+        keep &= (data['t'] >= t0 + a.window[0]) & (data['t'] <= t0 + a.window[1])
+    if keep.sum() < 50:
+        sys.exit(f'fit_lag: only {int(keep.sum())} samples in states {a.states}: nothing to fit')
     best = fit(data['t'][keep], data['u'][keep], data['v'][keep], a.dt)
     if best:
         print(f'\nconfig/tracker.yaml:  tracker.tau_v: {best[0]:.2f}   tracker.t_delay: {best[1]:.2f}')

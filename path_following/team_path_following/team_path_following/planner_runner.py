@@ -35,7 +35,9 @@ def run_planner(binary, config, out_dir, overrides=None, attempts=3, timeout_s=6
         if proc.returncode == 0 and os.path.exists(path_bin):
             log(f'planner OK in {time.monotonic() - t0:.1f} s (attempt {k + 1})')
             return path_bin, last
-        log(f'planner attempt {k + 1}/{attempts} failed: {last.strip().splitlines()[-1:] or "?"}')
+        why = [l for l in last.splitlines() if l.startswith('ERROR')] or last.strip().splitlines()[-1:] or \
+            [f'exit {proc.returncode}']
+        log(f'planner attempt {k + 1}/{attempts} failed (exit {proc.returncode}): {why[0]}')
     raise RuntimeError(f'planner failed {attempts} times: {shlex.join(cmd)}\n{last}')
 
 

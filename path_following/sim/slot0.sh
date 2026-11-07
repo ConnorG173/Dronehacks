@@ -11,6 +11,7 @@
 #                                 vio = track cuVSLAM odometry + launch-pose course->odom (the drone's fallback)
 #                                 loc = launch defaults: /team/odom_map + TF course->odom (needs team_loc running)
 #                                 extra args go to the launch file, e.g. setpoint_rate_hz:=50.0 speed_factor:=1.1
+#   reset                         restart the sim (fresh world + PX4) and wait for it to settle
 #   stop                          stop the team window and any bag recorder
 set -eo pipefail
 export SIM_ID=0
@@ -27,7 +28,7 @@ cmd="${1:-}"; shift || true
 case "$cmd" in
 build)
   dexec "$CONTAINER" bash -lc "$IN_C && colcon build --symlink-install --packages-select team_path_following"
-  dexec "$CONTAINER" bash -lc "cd /root/team && cmake -S planner -B planner/build -DCMAKE_BUILD_TYPE=Release >/dev/null && cmake --build planner/build -j8 --target gcopter_planner && ls -la planner/build/gcopter_planner"
+  dexec "$CONTAINER" bash -lc "source /opt/ros/humble/setup.bash && cd /root/team && cmake -S planner -B planner/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/opt/ros/humble >/dev/null && cmake --build planner/build -j8 --target gcopter_planner && ls -la planner/build/gcopter_planner"
   ;;
 fly)
   mode="${1:?gt|vio|loc}"; name="${2:?run name}"; shift 2
@@ -67,6 +68,16 @@ fly)
   dexec "$CONTAINER" bash -lc "$IN_C && python3 path_following/tools/eval_bag.py $out/bag $COURSE $out/plan/path.bin \
     --name '$name' --notes '$mode $*' --append docs/results/path_following.md; python3 path_following/tools/fit_lag.py $out/bag" \
     | tee "$REPO/$out/metrics.txt"
+  ;;
+reset)
+  # fresh world + PX4 (EKF2 restarts itself at 30 s; arm only after ~80 s)
+  tmux kill-window -t "$TMUX_SESSION:team" 2>/dev/null || true
+  bash "$REPO/sim/run_sim.sh" 0 stop || true
+  sleep 3
+  bash "$REPO/sim/run_sim.sh" 0
+  echo "settling 90 s..."
+  sleep 90
+  bash "$REPO/sim/tools/check_sim.sh" 2>&1 | grep -E "rate|xy_valid|armed" | head -8
   ;;
 stop)
   tmux kill-window -t "$TMUX_SESSION:team" 2>/dev/null || true

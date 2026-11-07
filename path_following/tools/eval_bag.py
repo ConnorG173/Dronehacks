@@ -24,13 +24,17 @@ def read_bag(path, topics):
     import rosbag2_py
     from rclpy.serialization import deserialize_message
     from rosidl_runtime_py.utilities import get_message
-    reader = rosbag2_py.SequentialReader()
+    reader = None
     for sid in ('mcap', 'sqlite3'):
         try:
-            reader.open(rosbag2_py.StorageOptions(uri=path, storage_id=sid), rosbag2_py.ConverterOptions('', ''))
+            r = rosbag2_py.SequentialReader()
+            r.open(rosbag2_py.StorageOptions(uri=path, storage_id=sid), rosbag2_py.ConverterOptions('', ''))
+            reader = r
             break
         except Exception:  # noqa: BLE001
-            reader = rosbag2_py.SequentialReader()
+            continue
+    if reader is None:
+        sys.exit(f'cannot open bag {path}')
     types = {t.name: t.type for t in reader.get_all_topics_and_types()}
     out = {t: [] for t in topics}
     while reader.has_next():
@@ -96,6 +100,8 @@ def main():
     a = ap.parse_args()
     course = load_course(a.course)
     traj = Trajectory.load(a.path, course)
+    import warnings
+    warnings.simplefilter('ignore', RuntimeWarning)
     r = evaluate(a.bag, course, traj)
     print(json.dumps(r))
     if a.append:

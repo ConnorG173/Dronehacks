@@ -41,7 +41,7 @@ OUR_ARGUMENTS = [
     ('repo_root', ROOT, 'repository root (planner binary, course config)'),
     ('course_config', os.path.join(ROOT, 'planner', 'config', 'course_v3.yaml'), 'planner course config'),
     ('planner_binary', os.path.join(ROOT, 'planner', 'build', 'gcopter_planner'), 'GCOPTER planner executable'),
-    ('planner_overrides', 'MaxVelMag=1.2', 'config overrides, "Key=value;Key=value"'),
+    ('planner_overrides', 'MaxVelMag=1.2', 'config overrides, "Key=value@Key=value" (or ;)'),
     ('path_file', '', 'fly this DHPATH file instead of planning'),
     ('tracker_params', os.path.join(ROOT, 'path_following', 'team_path_following', 'config', 'tracker.yaml'),
      'mission_tracker parameter file'),

@@ -55,7 +55,7 @@ Each run appends a row to `docs/results/path_following.md` and prints the fitted
 `tau_v`/`t_delay` into `config/tracker.yaml`.
 
 Drone (after the sim works; team decision): build the planner in the stack container
-(`cmake -S planner -B planner/build && cmake --build planner/build`), `team_build.sh`, then set
+(`cmake -S planner -B planner/build -DCMAKE_PREFIX_PATH=/opt/ros/humble && cmake --build planner/build`), `team_build.sh`, then set
 `COMPETITOR_PKG=team_path_following` and `COMPETITOR_LAUNCH=mission.launch.py` in `/etc/skybeta/drone.env`.
 Launch arguments: `speed_factor` (path-clock rate, 1.0 = as planned), `planner_overrides`
 (`"MaxVelMag=1.2"`), `max_speed_mps` (must match the interface; raising it needs the organizers' OK),

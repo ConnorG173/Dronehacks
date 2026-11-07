@@ -103,6 +103,7 @@ class MissionTracker(Node):
         d('use_px4_velocity', True)
         d('px4_local_position_topic', '/fmu/out/vehicle_local_position')
         d('latency_comp_s', 0.06)          # pose age assumed at arrival (VIO pipeline)
+        d('vel_agree_mps', 0.8)            # EKF2 velocity used only within this of the pose's velocity
         d('pose_timeout_s', 0.25)
         d('max_speed_mps', 1.5)            # must match the flight interface's
         d('speed_margin_mps', 0.1)
@@ -189,7 +190,7 @@ class MissionTracker(Node):
             path_file = self.gp('path_file')
             if not path_file:
                 overrides = {}
-                for kv in filter(None, (s.strip() for s in self.gp('planner_overrides').split(';'))):
+                for kv in filter(None, (s.strip() for s in self.gp('planner_overrides').replace('@', ';').split(';'))):
                     k, v = kv.split('=', 1)
                     overrides[k.strip()] = v.strip()
                 path_file, summary = plan_best(
@@ -346,10 +347,18 @@ class MissionTracker(Node):
         if src is None:
             return None, None, None, 1e9, 0
         if self.px4_vel is not None and T is not None and now - self.px4_vel[1] < 0.1:
-            v = T.apply_vec(self.px4_vel[0])
+            v_px4 = T.apply_vec(self.px4_vel[0])
+            # EKF2 velocity is lower latency, but it can glitch (seen in sim after a wall strike:
+            # -15 m/s while stationary). Use it only while it agrees with the pose's own velocity.
+            if v is None or np.linalg.norm(v_px4 - v) < self.gp('vel_agree_mps'):
+                v = v_px4
         age = now - rx
         if v is not None:
-            p = p + v * (age + lat)
+            # bounded latency compensation: a bad velocity must not move the estimate far
+            vmax = self.gp('max_speed_mps') + 0.5
+            n = float(np.linalg.norm(v))
+            v_pred = v * (vmax / n) if n > vmax else v
+            p = p + v_pred * min(age + lat, 0.15)
         return p, v, float(frames.wrap_pi(yaw)), age, src
 
     # ------------------------------------------------------------ loop
