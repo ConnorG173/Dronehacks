@@ -80,8 +80,8 @@ Numbers with sources are in section 9. In short:
   the course cloud, and a few thousand downsampled depth points register in milliseconds.
   `small_gicp_relocalization` is the same pattern but publishes `map → odom` directly, with no
   gating or fusion. We use the library, not the node.
-- **Visual landmarks (YOLO on renders, arXiv 2512.20475).** See section 9 for what that paper
-  does. For us the landmarks are few (window, tube mouth, pad, wall ends), the sim textures
+- **Visual landmarks (YOLO, arXiv 2512.20475).** See section 9: that paper trained on real
+  labelled images, not renders, and fused PnP positions into a linear drift KF. For us the landmarks are few (window, tube mouth, pad, wall ends), the sim textures
   are stand-ins, and a detector needs renders, training, a TensorRT export and a filter
   measurement model. That is more than our remaining time, and depth already covers walls and the window.
   Worth it after the event, or for the landing pad (floor markings depth cannot see).
@@ -93,7 +93,8 @@ Numbers with sources are in section 9. In short:
   correction", and is the standard 4-DOF drift correction in VIO loop closure (VINS-Mono's pose
   graph is 4-DOF for the same reason: roll and pitch are observable from gravity, x, y, z and yaw are not).
 - **Depth on the Jetson.** SGBM at half resolution is measured on this drone (36 ms p50). VPI's CUDA
-  stereo would move it to the idle GPU if the CPU gets tight. ESS is heavier and needs Isaac ROS
+  SGM (13 ms at 960×540 measured on an Orin Nano Super) would move it to the idle GPU if the CPU
+  gets tight. ESS is heavier and needs Isaac ROS
   packages we would have to add to the image. On-camera depth is the organizers' config and is
   short of USB bandwidth. Details in section 9.
 - **Dim tunnel.** cuVSLAM needs texture and stable brightness. The failure risks are auto-exposure
@@ -345,7 +346,75 @@ course (if the organizers allow it) to watch fixes live.
 
 ## 9. Research notes and sources
 
-(Filled in from the background research; see below.)
+"Estimate" marks our own arithmetic; everything else is from the cited source.
+
+**Drift-corrected VIO for racing (arXiv 2512.20475, KAIST, A2RL).**
+- VIO and detector: monocular OpenVINS. YOLOv8s-Pose (640², TensorRT FP16) detects gate boxes
+  plus the 4 inner corners; about 16 ms per frame on an Orin NX.
+- Measurements: detections are matched to the known gate map by reprojection (Hungarian), then
+  `solvePnP` IPPE_SQUARE gives the camera position (rotation discarded as too noisy). Gates:
+  1–13 m, skew ≤ 2, an occlusion filter.
+- Fusion: a loosely coupled **linear KF on the VIO drift** (position plus drift velocity).
+  Measurement covariance comes from perturbing the detections 50 times.
+- Training: on about 2,000 **real hand-labelled images**, not renders; synthetic data is listed as future work.
+- Result: ATE 1.04 → 0.56 m. Drift builds up between landmarks, and short exposure (against blur)
+  darkened the images and hurt the detector.
+- Takeaway for us: the loose drift-KF structure is what section 3.1 does, with walls instead of
+  gates. A detector trained on renders alone is less proven than the task brief assumed.
+- https://arxiv.org/abs/2512.20475, https://arxiv.org/html/2512.20475v1
+
+**Stereo depth on the Orin Nano.**
+- **VPI SGM (Isaac ROS `DisparityNode`, CUDA):** measured on Orin Nano Super, 960×540, 64
+  disparities: **84 fps, 13 ms**, GPU about 92 % at saturation. At 512×320 and 5 Hz that is an
+  estimated few percent of the GPU. This is the best upgrade path if SGBM's CPU cost matters.
+  The Orin Nano has no PVA or DLA, and an OFA is unconfirmed, so use the CUDA backend.
+  isaac_ros_benchmark `isaac_ros_disparity_node-orin_nano.json`;
+  https://docs.nvidia.com/vpi/3.2/algo_stereo_disparity.html
+- **ESS:** Humble packages exist for Isaac ROS 3.2. Orin Nano Super numbers exist only in the 5.0
+  docs: light ESS (480×288) 82 fps / 13 ms, full 35 fps / 30 ms. It needs the Isaac ROS ESS
+  packages and models in our image, so it is heavier to deploy than VPI.
+  https://nvidia-isaac-ros.github.io/v/release-3.2/repositories_and_packages/isaac_ros_dnn_stereo_depth/isaac_ros_ess/index.html
+- **OpenCV SGBM:** no published Orin number. On this drone the prototype measured 36 ms p50 at
+  512×320 with 96 disparities next to cuVSLAM, the only number that counts.
+- **On-camera (RVC2):** `pipeline_gen.i_pipeline_type: RGBD` (or `Depth`) with `stereo.*` params.
+  Fast Accuracy reaches 90 fps at 400P. Depth is aligned to the RGB camera unless
+  `stereo.i_aligned: false`. 640×400 16-bit at 15 Hz adds about 7.7 MB/s (estimate). The organizers
+  measured the link saturating around 143 MB/s with today's 118 MB/s of bgr8 monos, so the margin
+  is thin, and it is their config either way. https://docs.luxonis.com/software-v3/depthai/ros/parameters,
+  https://docs.luxonis.com/overview/toplevel-features/depth/
+
+**small_gicp.** The only published timings are KITTI frame-to-frame on a 64-core desktop: GICP
+about 60 ms with 1 thread and 24 ms with 4, including KD-tree and covariance builds. There are no
+ARM numbers. For scan-to-map the target tree is built once; with a few thousand source points,
+estimate tens of ms on 2–4 A78 cores, to be measured. `small_gicp_relocalization` expects an
+odom-registered cloud (FAST-LIO style), runs GICP at 2 Hz, publishes only TF `map → odom`, and has
+no fitness gating or covariance. Use the library, not the node.
+https://github.com/koide3/small_gicp/blob/master/BENCHMARK.md,
+https://github.com/Alex10086/small_gicp_relocalization
+
+**nav2_amcl / depthimage_to_laserscan.** AMCL takes any `LaserScan`, publishes `amcl_pose` and TF
+`map → odom` (`tf_broadcast: false` turns it off), needs odom → base TF, and does not update while
+hovering under its defaults (`update_min_d` 0.25 m, `update_min_a` 0.2 rad).
+`depthimage_to_laserscan` assumes a level camera. https://github.com/ros-navigation/navigation2/blob/humble/nav2_amcl/src/amcl_node.cpp,
+https://github.com/ros-perception/depthimage_to_laserscan/tree/ros2
+
+**robot_localization.** `publish_tf: false` works and it still publishes `odometry/filtered`.
+Fusing VO as `odom0_differential: true` plus absolute poses as `pose0` with `world_frame: map`
+works, with Mahalanobis rejection. https://github.com/cra-ros-pkg/robot_localization/blob/humble-devel/params/ekf.yaml
+
+**GTSAM.** `ros-humble-gtsam` 4.2.0 exists for jammy arm64. iSAM2 averages 2–30 ms per step on
+1,000–3,500-pose graphs (Kaess 2012), which is fine for us, but the build-out time is not.
+
+**cuVSLAM in low light.**
+- No documented lux or texture minimum. NVIDIA attributes tracking loss to blur, low light, or
+  wrong `camera_info`. `enable_image_denoising` is recommended for noisy low-light images, with no
+  numbers. cuVSLAM falls back to IMU for under a second only when IMU fusion is on, and **it is
+  off on our stack, so there is no fallback**.
+- depthai exposure: `r_set_autoexposure_limit` with `r_auto_exposure_limit` (µs, documented default
+  1000). If that default is live, the tube will be dark and noisy rather than blurred; ask the
+  organizers (Q2).
+- Blur estimate: about 640 px/rad × ω × t_exp, so at 1 rad/s a 5 ms exposure smears about 3 px.
+- https://nvidia-isaac-ros.github.io/v/release-3.2/concepts/visual_slam/cuvslam/index.html
 
 ## 10. Milestones (times PST)
 
