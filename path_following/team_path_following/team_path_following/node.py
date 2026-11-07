@@ -30,7 +30,7 @@ from std_msgs.msg import Float64MultiArray, MultiArrayDimension, String
 
 from . import frames
 from .clearance import ClearanceMap
-from .course import load_course, read_dhmap
+from .course import load_course, read_dhmap, write_reverse_config
 from .mission import Inputs, Mission, MissionParams, IDLE
 from .pathfile import Trajectory
 from .planner_runner import plan_best
@@ -45,7 +45,7 @@ try:
 except ImportError:  # pragma: no cover
     VehicleLocalPosition = None
 
-STATES = ['idle', 'takeoff', 'course', 'landing', 'landed', 'done', 'abort']
+STATES = ['idle', 'takeoff', 'course', 'landing', 'landed', 'done', 'abort', 'return']
 DEBUG_FIELDS = ['t', 'state', 'tau', 'taudot', 'e_along', 'e_cross', 'e_z',
                 'vcmd_x', 'vcmd_y', 'vcmd_z', 'v_x', 'v_y', 'v_z', 'p_x', 'p_y', 'p_z',
                 'ref_x', 'ref_y', 'ref_z', 'yaw_rate_cmd', 'pose_src', 'speed_scale', 'clearance']
@@ -89,6 +89,9 @@ class MissionTracker(Node):
         d('planner_budget_s', 45.0)
         d('out_dir', '/tmp/team_path_following')
         d('time_scale', 1.0)               # >1 slows the loaded plan uniformly
+        d('return_config', '')             # '' off | 'reverse' (course goal -> start) | a config path
+        d('return_path_file', '')          # fly this DHPATH file as the return instead of planning
+        d('return_z_ceiling_m', 1.6)       # map z ceiling on the return leg (rule 7.7 exception)
         d('control_rate_hz', 50.0)
         d('pose_topic', '/team/odom_map')  # map-frame odometry (contract)
         d('pose_topic_frame', 'course')    # 'course' | 'odom'
@@ -199,9 +202,18 @@ class MissionTracker(Node):
                 traj = traj.time_scaled(float(self.gp('time_scale')))
             if self.gp('clearance_slow_m') > 0.0:
                 self.clearance = ClearanceMap(read_dhmap(self.course.map_file), self.course.map_bound)
+            rtraj, rcourse = self.prepare_return(overrides if not self.gp('path_file') else {})
+            rtp = None
+            if rtraj is not None:
+                import copy
+                rtp = copy.copy(self.tracker_params)
+                rtp.z_ceiling = float(self.gp('return_z_ceiling_m'))
             self.traj = traj
             self.mission = Mission(traj, pad_z=float(self.course.start_pos[2]),
-                                   tracker_params=self.tracker_params, params=self.mission_params)
+                                   tracker_params=self.tracker_params, params=self.mission_params,
+                                   return_traj=rtraj,
+                                   return_pad_z=float(rcourse.start_pos[2]) if rcourse is not None else None,
+                                   return_tracker_params=rtp)
             self.publish_path()
             self.get_logger().info(
                 f'plan ready: {traj.duration:.2f} s, {traj.length:.2f} m, '
@@ -209,6 +221,32 @@ class MissionTracker(Node):
         except Exception as exc:  # noqa: BLE001
             self.plan_error = str(exc)
             self.get_logger().error(f'NO PLAN, publishing nothing (no autonomy on arming): {exc}')
+
+    def prepare_return(self, overrides):
+        """(trajectory, course) of the optional return leg, or (None, None). A failed return plan
+        never blocks the course: the mission then ends after the first landing."""
+        cfg = self.gp('return_config')
+        if not cfg:
+            return None, None
+        try:
+            out = os.path.join(self.gp('out_dir'), 'return')
+            os.makedirs(out, exist_ok=True)
+            if cfg == 'reverse':
+                cfg = write_reverse_config(self.course, os.path.join(out, 'return_config.yaml'))
+            rcourse = load_course(cfg)
+            path_file = self.gp('return_path_file')
+            if not path_file:
+                path_file, _ = plan_best(self.gp('planner_binary'), cfg, out, overrides,
+                                         candidates=int(self.gp('planner_candidates')),
+                                         budget_s=float(self.gp('planner_budget_s')), log=self.get_logger().info)
+            rtraj = Trajectory.load(path_file, rcourse)
+            if self.gp('time_scale') != 1.0:
+                rtraj = rtraj.time_scaled(float(self.gp('time_scale')))
+            self.get_logger().info(f'return plan ready: {rtraj.duration:.2f} s ({cfg})')
+            return rtraj, rcourse
+        except Exception as exc:  # noqa: BLE001
+            self.get_logger().error(f'no return plan (course still flies, mission ends at the first landing): {exc}')
+            return None, None
 
     def publish_path(self):
         msg = Path()

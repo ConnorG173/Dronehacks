@@ -69,7 +69,7 @@ class Course:
     def hover_point(self):
         return self.start_pos + np.array([0.0, 0.0, self.hover_height])
 
-    def write_derived(self, path, overrides):
+    def write_derived(self, path, overrides, drop=()):
         """Write a copy of this config with some keys replaced. Relative paths are
         rewritten relative to the copy's directory (the planner splits values on
         whitespace, so absolute paths with spaces would break)."""
@@ -78,6 +78,8 @@ class Course:
         with open(path, 'w', encoding='utf-8') as handle:
             handle.write(f'# derived from {os.path.abspath(self.path)} by team_path_following\n')
             for key, value in self.lines:
+                if key in drop:
+                    continue
                 if key in overrides:
                     value = str(overrides[key])
                 elif key in ('MapFile', 'OutDir'):
@@ -156,3 +158,14 @@ def write_dhmap(path, pts):
     with open(path, 'wb') as handle:
         handle.write(b'DHMAP\0\0\0' + struct.pack('<IIQ', 1, 0, len(pts)))
         handle.write(pts.tobytes())
+
+
+def write_reverse_config(course, path):
+    """Return-leg config derived from a course config: start on the ground under the course goal,
+    goal hovering over the course start, no checkpoints. A real return over a barrier needs its own
+    config (checkpoints, height); this is the generic default."""
+    fmt = lambda v: '[' + ', '.join(f'{x:.4f}' for x in v) + ']'  # noqa: E731
+    start = [course.goal[0], course.goal[1], course.start_pos[2]]
+    goal = course.start_pos + np.array([0.0, 0.0, course.hover_height])
+    course.write_derived(path, {'StartPos': fmt(start), 'Goal': fmt(goal)}, drop=('Checkpoint',))
+    return path

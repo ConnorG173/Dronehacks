@@ -1,4 +1,6 @@
 """Mission state machine: idle -> takeoff -> course -> landing -> landed -> done.
+Optional return leg (return_traj): landed -> (touch-and-go, inside PX4's auto-disarm window)
+-> return (takeoff + course on the second plan) -> landing -> landed -> done.
 
 Pure logic, no ROS. One call per control tick returns the velocity command (map
 ENU) and yaw rate. The output is always a velocity: this node never sends a pose,
@@ -14,6 +16,7 @@ from .tracker import Tracker, TrackerParams, hold_velocity
 
 IDLE, TAKEOFF, COURSE, LANDING, LANDED, DONE, ABORT = (
     'idle', 'takeoff', 'course', 'landing', 'landed', 'done', 'abort')
+RETURN = 'return'    # published while taking off / flying on the return plan
 FLYING = (TAKEOFF, COURSE, LANDING, LANDED)
 
 
@@ -33,6 +36,8 @@ class MissionParams:
     land_slow_height: float = 0.25  # m above the pad: switch to slow
     land_vxy: float = 0.3
     odom_timeout: float = 0.25     # s: older pose -> zero velocity
+    return_touch_s: float = 0.5    # s on the pad after PX4 reports landed, then relaunch (must stay
+                                   # well below COM_DISARM_LAND = 2 s or PX4 disarms first)
     warn_scale: float = 0.5        # speed scale on localization WARN
 
 
@@ -61,11 +66,16 @@ class Output:
 
 class Mission:
 
-    def __init__(self, traj, pad_z, tracker_params=None, params=None):
+    def __init__(self, traj, pad_z, tracker_params=None, params=None,
+                 return_traj=None, return_pad_z=None, return_tracker_params=None):
         self.traj = traj
         self.pad_z = float(pad_z)      # map z of the ground under the goal
         self.p = params or MissionParams()
         self.tracker = Tracker(traj, tracker_params or TrackerParams())
+        self.return_traj = return_traj
+        self.return_pad_z = float(pad_z if return_pad_z is None else return_pad_z)
+        self.return_tracker_params = return_tracker_params or self.tracker.p
+        self.leg = 0                   # 0 = course, 1 = return
         self.state = IDLE
         self.t_state = None
         self.t_settled = None
@@ -74,10 +84,25 @@ class Mission:
         self.t_touch = None
         self.events = []               # (time, state) transitions for logs/metrics
 
+    @property
+    def public_state(self):
+        """State name for /team/mission/state (contract), 'return' on the return leg."""
+        if self.leg == 1 and self.state in (TAKEOFF, COURSE):
+            return RETURN
+        return self.state
+
     def _go(self, now, state, note=''):
         self.state = state
         self.t_state = now
-        self.events.append((now, state, note))
+        self.events.append((now, self.public_state, note))
+
+    def _start_return(self, now):
+        self.leg = 1
+        self.traj = self.return_traj
+        self.pad_z = self.return_pad_z
+        self.tracker = Tracker(self.return_traj, self.return_tracker_params)
+        self.t_settled = self.t_height = self.t_finished = None
+        self._go(now, TAKEOFF, 'return: touch-and-go')
 
     def step(self, dt, s):
         if self.t_state is None:
@@ -88,7 +113,7 @@ class Mission:
                 self._go(s.now, DONE, 'offboard ended after touchdown')
             else:
                 self._go(s.now, ABORT, 'offboard lost in flight')
-            return Output(np.zeros(3), 0.0, self.state)
+            return Output(np.zeros(3), 0.0, self.public_state)
 
         if self.state in (DONE, ABORT):
             return self._zero()
@@ -101,9 +126,9 @@ class Mission:
 
         # flying states need a fresh pose
         if s.pos is None or s.pose_age > self.p.odom_timeout:
-            return Output(np.zeros(3), 0.0, self.state, 'stale pose: zero velocity')
+            return Output(np.zeros(3), 0.0, self.public_state, 'stale pose: zero velocity')
         if s.loc_level == 'ERROR':
-            return Output(np.zeros(3), 0.0, self.state, 'localization ERROR: holding')
+            return Output(np.zeros(3), 0.0, self.public_state, 'localization ERROR: holding')
 
         pos = np.asarray(s.pos, float)
         vel = np.zeros(3) if s.vel is None else np.asarray(s.vel, float)
@@ -129,7 +154,7 @@ class Mission:
                 # the plan starts at rest, so the clock can start at full rate
                 self.tracker.reset(tau=0.0, taudot=self.tracker.p.taudot_max)
                 self._go(s.now, COURSE)
-            return Output(v, yr, self.state)
+            return Output(v, yr, self.public_state)
 
         if self.state == COURSE:
             scale = s.clearance_scale * (p.warn_scale if s.loc_level == 'WARN' else 1.0)
@@ -139,7 +164,7 @@ class Mission:
                 at_goal = float(np.linalg.norm(self.traj.p[-1] - pos)) < p.arrive_tol
                 if at_goal or s.now - self.t_finished > p.finish_wait_max:
                     self._go(s.now, LANDING)
-            return Output(v, yr, self.state, debug=dict(self.tracker.last))
+            return Output(v, yr, self.public_state, debug=dict(self.tracker.last))
 
         goal = self.traj.p[-1]
         if self.state == LANDING:
@@ -149,19 +174,22 @@ class Mission:
             if s.landed:
                 self.t_touch = s.now
                 self._go(s.now, LANDED)
-            return Output(v, self._yaw_hold(yaw, self.traj.yaw[-1]), self.state)
+            return Output(v, self._yaw_hold(yaw, self.traj.yaw[-1]), self.public_state)
 
         if self.state == LANDED:
             if not s.armed:
                 self._go(s.now, DONE, 'disarmed')
                 return self._zero()
+            if self.leg == 0 and self.return_traj is not None and s.now - self.t_touch >= p.return_touch_s:
+                self._start_return(s.now)
+                return Output(np.zeros(3), 0.0, self.public_state)
             # keep pressing down until PX4 disarms (COM_DISARM_LAND)
-            return Output(np.array([0.0, 0.0, -p.land_vz_slow]), 0.0, self.state)
+            return Output(np.array([0.0, 0.0, -p.land_vz_slow]), 0.0, self.public_state)
 
         return self._zero()
 
     def _zero(self):
-        return Output(np.zeros(3), 0.0, self.state)
+        return Output(np.zeros(3), 0.0, self.public_state)
 
     def _yaw_hold(self, yaw, target, k=1.5, rmax=1.0):
         from .frames import wrap_pi

@@ -51,6 +51,8 @@ OUR_ARGUMENTS = [
     ('time_scale', '1.0', 'uniform slow-down (>1) of the loaded plan'),
     ('speed_factor', '1.0', 'max path-clock rate: >1 flies faster than planned (1.15 validated in kinsim)'),
     ('z_ceiling_m', '1.6', 'map z ceiling enforced by mission_tracker'),
+    ('return_config', '', "return leg: '' off | 'reverse' (goal -> start) | config path (needs organizers' OK)"),
+    ('return_z_ceiling_m', '1.6', 'map z ceiling on the return leg'),
     ('out_dir', '/tmp/team_path_following', 'planner output directory'),
 ]
 
@@ -88,6 +90,8 @@ def _nodes(context):
         'tracker.taudot_max': float(lc('speed_factor')),
         'max_speed_mps': float(lc('max_speed_mps')),
         'z_ceiling_m': float(lc('z_ceiling_m')),
+        'return_config': lc('return_config'),
+        'return_z_ceiling_m': float(lc('return_z_ceiling_m')),
         'out_dir': lc('out_dir'),
     })
     tracker = Node(

@@ -96,7 +96,7 @@ class Px4Model:
             self.v[:] = 0.0
             self.t_takeoff = None
             return
-        if self.landed and not self.flew:
+        if self.landed:
             if getattr(self, 't_takeoff', None) is None:
                 self.t_takeoff = t
             ramp = min(1.0, (t - self.t_takeoff) / max(sp.takeoff_ramp_s, 1e-3))
@@ -140,12 +140,13 @@ def path_distance(traj, p, tau, window=3.0):
 
 
 def run(course, traj, tracker_params=None, mission_params=None, sim=None, clearance=None,
-        record=False):
+        record=False, return_traj=None, return_course=None):
     sp = sim or SimParams()
     rng = np.random.default_rng(sp.seed)
     tp = tracker_params or TrackerParams(v_max=sp.max_speed_mps - 0.1)
     mission = Mission(traj, pad_z=float(course.start_pos[2]), tracker_params=tp,
-                      params=mission_params or MissionParams())
+                      params=mission_params or MissionParams(), return_traj=return_traj,
+                      return_pad_z=float(return_course.start_pos[2]) if return_course is not None else None)
     if clearance is None:
         clearance = ClearanceMap(read_dhmap(course.map_file), course.map_bound)
 
@@ -175,6 +176,7 @@ def run(course, traj, tracker_params=None, mission_params=None, sim=None, cleara
     touches = 0
     touching = False
     clamped = 0
+    first_land_pos = None
     max_xt = 0.0
     xt_sq = []
     t = 0.0
@@ -224,7 +226,7 @@ def run(course, traj, tracker_params=None, mission_params=None, sim=None, cleara
                 d = out.debug
                 log.append([t, *px4.p, *px4.v, d.get('tau', np.nan), d.get('taudot', np.nan),
                             d.get('e_cross', np.nan), *(d.get('p_ref', [np.nan] * 3)), *out.v,
-                            ['idle', 'takeoff', 'course', 'landing', 'landed', 'done', 'abort'].index(out.state)])
+                            ['idle', 'takeoff', 'course', 'landing', 'landed', 'done', 'abort', 'return'].index(out.state)])
             if mission.state in (DONE, ABORT):
                 break
 
@@ -251,7 +253,9 @@ def run(course, traj, tracker_params=None, mission_params=None, sim=None, cleara
         px4.step(sp.dt, px4_sp[0] if offboard else np.zeros(3), px4_sp[1] if offboard else 0.0, t)
 
         # metrics
-        if mission.state == COURSE:
+        if first_land_pos is None and mission.state == 'landed':
+            first_land_pos = px4.p.copy()
+        if mission.state == COURSE and mission.leg == 0:
             c = clearance.distance(px4.p)
             min_clear = min(min_clear, c)
             if c < sp.radius_m and not touching:
@@ -260,19 +264,22 @@ def run(course, traj, tracker_params=None, mission_params=None, sim=None, cleara
             xt = path_distance(traj, px4.p, mission.tracker.tau)
             max_xt = max(max_xt, xt)
             xt_sq.append(xt * xt)
-        if mission.state in (COURSE, LANDING):
+        if mission.state in (COURSE, LANDING) and mission.leg == 0:
             for k, b in enumerate(course.checkpoints):
                 out = np.maximum(np.abs(px4.p - b.center) - b.half, 0.0)
                 cp_miss[k] = min(cp_miss[k], float(np.linalg.norm(out)))
-        if mission.state in (COURSE, LANDING) and cp_next < len(course.checkpoints):
+        if mission.state in (COURSE, LANDING) and mission.leg == 0 and cp_next < len(course.checkpoints):
             if course.checkpoints[cp_next].contains(px4.p):
                 cps_hit.append(t)
                 cp_next += 1
         t += sp.dt
 
-    ev = {s: tt for tt, s, _ in mission.events}
+    ev = {}
+    for tt, s_, _ in mission.events:   # first occurrence of each state
+        ev.setdefault(s_, tt)
+    landed_all = [tt for tt, s_, _ in mission.events if s_ == 'landed']
     t_course = ev.get(LANDING, np.nan) - ev.get(COURSE, np.nan)
-    land_err = float(np.linalg.norm(px4.p[:2] - traj.p[-1][:2]))
+    land_err = float(np.linalg.norm((first_land_pos if first_land_pos is not None else px4.p)[:2] - traj.p[-1][:2]))
     res = dict(
         result=mission.state,
         course_time_s=round(float(t_course), 2),
@@ -289,6 +296,10 @@ def run(course, traj, tracker_params=None, mission_params=None, sim=None, cleara
         land_err_m=round(land_err, 3),
         disarmed=not px4.armed,
     )
+    if return_traj is not None:
+        res['return_time_s'] = round(float(landed_all[-1] - ev['return']), 2) if 'return' in ev and len(landed_all) > 1 else None
+        res['total_time_s'] = round(float(landed_all[-1] - t_offboard), 2) if len(landed_all) > 1 else None
+        res['return_land_err_m'] = round(float(np.linalg.norm(px4.p[:2] - return_traj.p[-1][:2])), 3)
     if record:
         res['log'] = np.array(log)
     return res
@@ -326,6 +337,8 @@ def main():
     ap.add_argument('--speed-scale', type=float, default=1.0, help='slow the plan by K (>1) or speed it up')
     ap.add_argument('--set', action='append', default=[], help='tracker/sim/mission param, e.g. kc=1.5 or sim.setpoint_rate_hz=50')
     ap.add_argument('--plot')
+    ap.add_argument('--return-course', help='return-leg config (enables the touch-and-go return)')
+    ap.add_argument('--return-path', help='return-leg DHPATH file')
     ap.add_argument('--json', action='store_true')
     ap.add_argument('--npz', help='save t, u (commanded), v (true), state for fit_lag.py')
     a = ap.parse_args()
@@ -347,7 +360,9 @@ def main():
         setattr(target, k, type(cur)(v) if not isinstance(cur, str) else v)
     if not any(kv.startswith('v_max') for kv in a.set):
         tp.v_max = sim.max_speed_mps - 0.1
-    res = run(course, traj, tp, mp, sim, record=bool(a.plot or a.npz))
+    rc = load_course(a.return_course) if a.return_course else None
+    rt = Trajectory.load(a.return_path, rc) if rc is not None else None
+    res = run(course, traj, tp, mp, sim, record=bool(a.plot or a.npz), return_traj=rt, return_course=rc)
     if a.npz:
         lg = res['log']
         np.savez(a.npz, t=lg[:, 0], v=lg[:, 4:7], u=lg[:, 13:16], state=lg[:, -1])

@@ -109,6 +109,15 @@ Real `mission_tracker` node + planner at startup: idle → takeoff → course �
 course 18.3 s on a 17.5 s plan, touchdown 4 cm from the goal. A "go" before the plan was ready was
 correctly refused (the node publishes nothing until it has a plan).
 
+### Return leg (optional, `return_config`; needs the organizers' OK)
+
+Touch-and-go: after PX4 reports landed on the pad, wait 0.5 s (PX4 auto-disarms only after
+`COM_DISARM_LAND` = 2 s), climb again in the same Offboard session, fly a second plan, land. With
+`return_config:=reverse` (generic: pad → over the launch mark, no checkpoints; a real return over the
+barrier needs its own config): return plan 4.7 s, return 9.5 s incl. takeoff ramp and landing, final
+touchdown 4 mm from target, total 31.5 s. ROS e2e: idle → takeoff → course → landing → landed → return →
+landing → landed → done.
+
 ## Gazebo slot 0 (`path_following/sim/slot0.sh`)
 
 | sim | run | result | mission s | course s | plan s | max xt | rms xt | min clear | touches | checkpoints | cp miss | land err | notes |

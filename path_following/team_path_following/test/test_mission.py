@@ -1,6 +1,6 @@
 import numpy as np
 
-from team_path_following.mission import Inputs, Mission, IDLE, TAKEOFF, COURSE, LANDING, LANDED, DONE, ABORT
+from team_path_following.mission import Inputs, Mission, IDLE, TAKEOFF, COURSE, LANDING, LANDED, DONE, ABORT, RETURN
 from test_tracker import line_traj
 
 
@@ -30,8 +30,11 @@ def sim(mission, drop_offboard_at=None, t_max=60.0):
                 landed = True
         else:
             landed = False
-        if mission.state == LANDED:
-            armed = False
+        if mission.state == LANDED and (mission.return_traj is None or mission.leg == 1):
+            if not hasattr(mission, '_t_l'):
+                mission._t_l = t
+            if t - mission._t_l > 2.0:   # PX4 COM_DISARM_LAND
+                armed = False
         if mission.state in (DONE, ABORT):
             break
         t += dt
@@ -65,3 +68,15 @@ def test_stale_pose_zero_velocity():
     out = m.step(0.02, Inputs(now=0.02, offboard=True, armed=True, landed=True,
                               pos=np.zeros(3), vel=np.zeros(3), yaw=0.0, pose_age=1.0))
     assert np.all(out.v == 0) and 'stale' in out.note
+
+
+def test_return_touch_and_go():
+    out_traj = line_traj()
+    back = line_traj()
+    back.p = back.p[::-1].copy()
+    back.v = -back.v[::-1].copy()
+    back.a = back.a[::-1].copy()
+    m = Mission(out_traj, pad_z=0.0, return_traj=back, return_pad_z=0.0)
+    seen, pos = sim(m, t_max=90.0)
+    assert seen == [IDLE, TAKEOFF, COURSE, LANDING, LANDED, RETURN, LANDING, LANDED, DONE], seen
+    assert np.linalg.norm(pos[:2] - back.p[-1][:2]) < 0.2

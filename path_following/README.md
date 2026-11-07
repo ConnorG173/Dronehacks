@@ -59,7 +59,8 @@ Drone (after the sim works; team decision): build the planner in the stack conta
 `COMPETITOR_PKG=team_path_following` and `COMPETITOR_LAUNCH=mission.launch.py` in `/etc/skybeta/drone.env`.
 Launch arguments: `speed_factor` (path-clock rate, 1.0 = as planned), `planner_overrides`
 (`"MaxVelMag=1.2"`), `max_speed_mps` (must match the interface; raising it needs the organizers' OK),
-`setpoint_rate_hz`, `pose_topic` (default `/team/odom_map`).
+`setpoint_rate_hz`, `pose_topic` (default `/team/odom_map`), `base_height_on_pad_m`,
+`return_config` (`''` off, `reverse`, or a config path: touch-and-go return leg, only with the organizers' OK).
 
 ## Libraries
 
