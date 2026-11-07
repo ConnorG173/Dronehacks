@@ -88,6 +88,7 @@ def write_obj(meshes_by_mat, out_dir, tile):
     os.makedirs(mesh_dir, exist_ok=True)
     obj_lines, mtl_lines = ["mtllib course.mtl"], []
     v_off = 1
+    n_off = 1
     for mat, meshes in meshes_by_mat.items():
         tex = f"{mat}.png"
         mtl_lines += [f"newmtl {mat}", "Ka 0 0 0", "Kd 1 1 1", "Ks 0.05 0.05 0.05", "Ns 10",
@@ -102,9 +103,17 @@ def write_obj(meshes_by_mat, out_dir, tile):
                     obj_lines.append(f"v {p[0]:.5f} {p[1]:.5f} {p[2]:.5f}")
                 for t in uv:
                     obj_lines.append(f"vt {t[0]:.5f} {t[1]:.5f}")
+                # Explicit face normal: without `vn` the renderer has no normals to light with, and the
+                # whole course came out saturated white (no texture, no shading, nothing for VIO to track).
+                nrm = np.cross(pts[1] - pts[0], pts[2] - pts[0])
+                ln = np.linalg.norm(nrm)
+                nrm = nrm / ln if ln > 0 else np.array([0.0, 0.0, 1.0])
+                obj_lines.append(f"vn {nrm[0]:.5f} {nrm[1]:.5f} {nrm[2]:.5f}")
                 a, b, c = v_off, v_off + 1, v_off + 2
-                obj_lines.append(f"f {a}/{a} {b}/{b} {c}/{c}")
+                k = n_off
+                obj_lines.append(f"f {a}/{a}/{k} {b}/{b}/{k} {c}/{c}/{k}")
                 v_off += 3
+                n_off += 1
     with open(os.path.join(mesh_dir, "course.obj"), "w") as f:
         f.write("\n".join(obj_lines) + "\n")
     with open(os.path.join(mesh_dir, "course.mtl"), "w") as f:
