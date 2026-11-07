@@ -8,7 +8,7 @@
 #   fly <gt|vio> <name> [args]    launch flight interface + mission_tracker (tmux window 'team'), record a bag,
 #                                 give the pilot's go, wait for done/abort (or 180 s), land, score the run
 #                                 gt  = track ground truth (/sim/ground_truth/odom, map frame): tests the tracker
-#                                 vio = track cuVSLAM odometry + launch-pose map->odom (the drone's fallback)
+#                                 vio = track cuVSLAM odometry + launch-pose course->odom (the drone's fallback)
 #                                 extra args go to the launch file, e.g. setpoint_rate_hz:=50.0
 #   stop                          stop the team window and any bag recorder
 set -eo pipefail
@@ -29,7 +29,7 @@ build)
 fly)
   mode="${1:?gt|vio}"; name="${2:?run name}"; shift 2
   case "$mode" in
-    gt)  POSE_ARGS="pose_topic:=/sim/ground_truth/odom pose_topic_frame:=map" ;;
+    gt)  POSE_ARGS="pose_topic:=/sim/ground_truth/odom pose_topic_frame:=course" ;;
     vio) POSE_ARGS="pose_topic:=/visual_slam/tracking/odometry pose_topic_frame:=odom" ;;
     *) echo "mode must be gt or vio"; exit 1 ;;
   esac

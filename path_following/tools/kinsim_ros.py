@@ -46,7 +46,7 @@ def odom_msg(frame, p, yaw, v_world, stamp):
 
 class KinSimRos(Node):
 
-    def __init__(self, course, sp, exit_when_done):
+    def __init__(self, course, sp, exit_when_done, with_loc=False):
         super().__init__('kinsim')
         self.sp = sp
         self.course = course
@@ -65,6 +65,13 @@ class KinSimRos(Node):
         self.t_armed = None
         self.odom_q = []
         self.exit_when_done = exit_when_done
+        self.with_loc = with_loc
+        if with_loc:
+            import tf2_ros
+            from diagnostic_msgs.msg import DiagnosticStatus
+            self.tf_br = tf2_ros.TransformBroadcaster(self)
+            self.loc_pub = self.create_publisher(Odometry, '/team/odom_map', 10)
+            self.status_pub = self.create_publisher(DiagnosticStatus, '/team/loc/status', 10)
         self.create_subscription(TwistStamped, '/skybeta/setpoint/twist', self.twist_cb, 10)
         self.vio_pub = self.create_publisher(Odometry, '/visual_slam/tracking/odometry', 10)
         self.gt_pub = self.create_publisher(Odometry, '/sim/ground_truth/odom', 10)
@@ -135,7 +142,7 @@ class KinSimRos(Node):
             self.get_logger().error('END timeout')
             raise SystemExit(1)
         stamp = self.get_clock().now().to_msg()
-        self.gt_pub.publish(odom_msg('map', self.px4.p, self.px4.yaw, self.px4.v, stamp))
+        self.gt_pub.publish(odom_msg('course', self.px4.p, self.px4.yaw, self.px4.v, stamp))
 
     def vio(self):
         Ti = self.T.inverse()
@@ -144,7 +151,36 @@ class KinSimRos(Node):
         msg = odom_msg('odom', p, yaw, Ti.apply_vec(self.px4.v), self.get_clock().now().to_msg())
         self.odom_q.append((self.t + self.sp.odom_latency_s, msg))
         while self.odom_q and self.odom_q[0][0] <= self.t:
-            self.vio_pub.publish(self.odom_q.pop(0)[1])
+            m = self.odom_q.pop(0)[1]
+            self.vio_pub.publish(m)
+            if self.with_loc:
+                self.publish_loc(m)
+
+    def publish_loc(self, m):
+        """Localization stand-in (CONTRACTS): TF map->odom (cuVSLAM, identity with SLAM off),
+        TF course->map (team_loc anchor = launch pose), /team/odom_map in course, status OK."""
+        from geometry_msgs.msg import TransformStamped
+        from diagnostic_msgs.msg import DiagnosticStatus
+        stamp = self.get_clock().now().to_msg()
+        tfs = []
+        for parent, child, pose in (('map', 'odom', frames.Pose2()), ('course', 'map', self.T)):
+            tf = TransformStamped()
+            tf.header.stamp, tf.header.frame_id, tf.child_frame_id = stamp, parent, child
+            tf.transform.translation.x, tf.transform.translation.y, tf.transform.translation.z = pose.x, pose.y, pose.z
+            tf.transform.rotation.z, tf.transform.rotation.w = math.sin(pose.yaw / 2), math.cos(pose.yaw / 2)
+            tfs.append(tf)
+        self.tf_br.sendTransform(tfs)
+        q = m.pose.pose.orientation
+        po = np.array([m.pose.pose.position.x, m.pose.pose.position.y, m.pose.pose.position.z])
+        pc = self.T.apply(po)
+        yaw = float(frames.wrap_pi(frames.yaw_from_quat(q.x, q.y, q.z, q.w) + self.T.yaw))
+        o = Odometry()
+        o.header.stamp, o.header.frame_id, o.child_frame_id = m.header.stamp, 'course', 'base_link'
+        o.pose.pose.position.x, o.pose.pose.position.y, o.pose.pose.position.z = (float(c) for c in pc)
+        o.pose.pose.orientation.z, o.pose.pose.orientation.w = math.sin(yaw / 2), math.cos(yaw / 2)
+        o.twist = m.twist
+        self.loc_pub.publish(o)
+        self.status_pub.publish(DiagnosticStatus(level=DiagnosticStatus.OK, name='team_loc', message='stand-in'))
 
     def state(self):
         Ti = self.T.inverse()
@@ -161,10 +197,11 @@ def main():
     ap.add_argument('course')
     ap.add_argument('--setpoint-rate', type=float, default=10.0)
     ap.add_argument('--exit-when-done', action='store_true')
+    ap.add_argument('--with-loc', action='store_true', help='also play localization: TFs + /team/odom_map')
     a, rest = ap.parse_known_args()
     rclpy.init(args=rest)
     sp = SimParams(setpoint_rate_hz=a.setpoint_rate)
-    node = KinSimRos(load_course(a.course), sp, a.exit_when_done)
+    node = KinSimRos(load_course(a.course), sp, a.exit_when_done, a.with_loc)
     try:
         rclpy.spin(node)
     except (KeyboardInterrupt, SystemExit):

@@ -1,13 +1,15 @@
 """mission_tracker: plan once, then fly the plan with velocity setpoints.
 
-In:   /team/odom_map (map pose, localization), /visual_slam/tracking/odometry (VIO,
-      fallback), TF map->odom, /team/loc/status, /skybeta/state,
+In:   /team/odom_map (pose in `course`, localization), /visual_slam/tracking/odometry
+      (VIO, fallback), TF course->odom (localization's course->map + cuVSLAM's map->odom),
+      /team/loc/status, /skybeta/state,
       /fmu/out/vehicle_local_position (read only, low-latency velocity; optional)
 Out:  /skybeta/setpoint/twist (the only setpoint; never a pose), /team/plan/path,
       /team/mission/state, /team/tracker/debug
 
-Frames: all control in map ENU; the command is rotated into odom ENU with the latest
-map->odom (TF from localization, else the launch-pose fallback captured at go).
+Frames (docs/CONTRACTS.md): all control in the planner's `course` frame (ENU; called "map" in
+the pure modules); the command is rotated into cuVSLAM's odom ENU with the latest course->odom
+(TF, else the launch-pose fallback captured at go).
 """
 import json
 import math
@@ -89,9 +91,12 @@ class MissionTracker(Node):
         d('time_scale', 1.0)               # >1 slows the loaded plan uniformly
         d('control_rate_hz', 50.0)
         d('pose_topic', '/team/odom_map')  # map-frame odometry (contract)
-        d('pose_topic_frame', 'map')       # 'map' | 'odom'
+        d('pose_topic_frame', 'course')    # 'course' | 'odom'
+        d('course_frame', 'course')
+        d('odom_frame', 'odom')
+        d('base_height_on_pad_m', 0.0)     # base_link above the floor on the pad (fallback only)
         d('vio_topic', '/visual_slam/tracking/odometry')
-        d('use_tf', True)                  # map->odom from TF when available
+        d('use_tf', True)                  # course->odom from TF when available
         d('use_px4_velocity', True)
         d('px4_local_position_topic', '/fmu/out/vehicle_local_position')
         d('latency_comp_s', 0.06)          # pose age assumed at arrival (VIO pipeline)
@@ -207,11 +212,11 @@ class MissionTracker(Node):
 
     def publish_path(self):
         msg = Path()
-        msg.header.frame_id = 'map'
+        msg.header.frame_id = self.gp('course_frame')
         msg.header.stamp = self.get_clock().now().to_msg()
         for i in self.traj.decimated(10):
             ps = PoseStamped()
-            ps.header.frame_id = 'map'
+            ps.header.frame_id = self.gp('course_frame')
             ps.pose.position.x, ps.pose.position.y, ps.pose.position.z = (float(c) for c in self.traj.p[i])
             yaw = float(self.traj.yaw[i])
             ps.pose.orientation.z, ps.pose.orientation.w = math.sin(yaw / 2), math.cos(yaw / 2)
@@ -223,6 +228,10 @@ class MissionTracker(Node):
         return time.monotonic()
 
     def pose_cb(self, msg):
+        want = self.gp('course_frame') if self.gp('pose_topic_frame') != 'odom' else self.gp('odom_frame')
+        if msg.header.frame_id and msg.header.frame_id != want and not getattr(self, '_frame_warned', False):
+            self._frame_warned = True
+            self.get_logger().warn(f'{self.gp("pose_topic")} frame_id "{msg.header.frame_id}", expected "{want}"')
         s = _odom_to_sample(msg, self.now())
         if s is not None:
             self.pose = s
@@ -261,7 +270,8 @@ class MissionTracker(Node):
     def update_map_odom(self):
         if self.tf_buffer is not None:
             try:
-                tf = self.tf_buffer.lookup_transform('map', 'odom', rclpy.time.Time())
+                tf = self.tf_buffer.lookup_transform(self.gp('course_frame'), self.gp('odom_frame'),
+                                                     rclpy.time.Time())
                 tr, q = tf.transform.translation, tf.transform.rotation
                 self.t_map_odom = frames.Pose2(tr.x, tr.y, tr.z, frames.yaw_from_quat(q.x, q.y, q.z, q.w))
                 self.t_map_odom_src = 'tf'
@@ -273,8 +283,9 @@ class MissionTracker(Node):
         # fallback (contract): launch pose, re-captured from VIO until the go signal
         vio = self.vio if self.vio is not None else (self.pose if self.gp('pose_topic_frame') == 'odom' else None)
         if vio is not None and not self.go_captured:
-            self.t_map_odom = frames.map_odom_at_go(frames.map_from_launch(self.course),
-                                                    frames.Pose2(*vio.p, vio.yaw))
+            launch = frames.map_from_launch(self.course)
+            launch.z += float(self.gp('base_height_on_pad_m'))
+            self.t_map_odom = frames.map_odom_at_go(launch, frames.Pose2(*vio.p, vio.yaw))
             self.t_map_odom_src = 'launch'
 
     def current_pose(self, now):
@@ -285,7 +296,7 @@ class MissionTracker(Node):
         src, p, yaw, v, rx = None, None, None, None, None
         if self.pose is not None and now - self.pose.rx < timeout:
             s = self.pose
-            if self.gp('pose_topic_frame') == 'map':
+            if self.gp('pose_topic_frame') != 'odom':
                 src, p, yaw, v, rx = 1, s.p, s.yaw, s.v, s.rx
             elif T is not None:
                 src, p, yaw = 1, T.apply(s.p), s.yaw + T.yaw
@@ -313,7 +324,7 @@ class MissionTracker(Node):
         offboard = bool(fs.get('offboard_active', False))
         if offboard and not self.go_captured:
             self.go_captured = True
-            self.get_logger().info(f'go: map->odom {self.t_map_odom} ({self.t_map_odom_src})')
+            self.get_logger().info(f'go: course->odom {self.t_map_odom} ({self.t_map_odom_src})')
         pos, vel, yaw, age, src = self.current_pose(now)
         clear, cscale = float('nan'), 1.0
         if self.clearance is not None and pos is not None:
