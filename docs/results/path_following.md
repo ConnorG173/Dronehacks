@@ -47,6 +47,12 @@ Robustness of the default against plant mismatch:
 | drag 0.5 /s | 21.9 | 0.138 | 0.32 | 0 |
 | VIO drift 2 cm/s random walk (localization's job) | 17.6 | 0.322 | 0.10 | 1 |
 
+Velocity-estimate scale error (PX4's EKF2 velocity = scale × true, so the vehicle flies 1/scale × the
+command): scale 0.8 → 6 touches, 0.6 → 15 touches, 1.25 → slow but clean. On the drone EKF2 and our pose
+both come from cuVSLAM, so a VIO scale error is consistent in the frame we track in (the world path is
+scaled instead: localization's job). It only bites when the pose source differs from what PX4 fuses: sim
+ground truth with a broken VIO (today), or a localization scale correction.
+
 **Lesson: fit τ_v / t_delay from logs (`tools/fit_lag.py`, on sim and real bags) before trusting speed.**
 Under-estimating τ_v is what produces touches. Over-estimating is benign.
 

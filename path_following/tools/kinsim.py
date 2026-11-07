@@ -55,6 +55,7 @@ class SimParams:
     yaw_tau: float = 0.15
     takeoff_ramp_s: float = 3.0       # MPC_TKO_RAMP_T: vertical setpoint ramps in after liftoff
     ekf_vel_delay_s: float = 0.0      # PX4 controls on a delayed velocity estimate (VIO-derived EKF2)
+    ekf_vel_scale: float = 1.0        # EKF2 velocity = scale x true (VIO scale error); <1: flies faster than told
     link_delay_s: float = 0.02        # DDS + uXRCE to PX4
     # VIO
     odom_hz: float = 30.0
@@ -111,6 +112,7 @@ class Px4Model:
         v_est = self._vhist[-1 - nd] if len(self._vhist) > nd else self._vhist[0]
         if len(self._vhist) > 200:
             del self._vhist[:100]
+        v_est = v_est * np.array([sp.ekf_vel_scale, sp.ekf_vel_scale, 1.0])
         e = v_sp - v_est
         kp = np.array([sp.xy_p, sp.xy_p, sp.z_p])
         ki = np.array([sp.xy_i, sp.xy_i, sp.z_i])

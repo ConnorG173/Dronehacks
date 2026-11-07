@@ -84,6 +84,46 @@ def fit(t, u, v, dt, delays=np.arange(0.0, 0.41, 0.02)):
     return best
 
 
+def fit2(t, u, v, dt, delays=np.arange(0.0, 0.41, 0.02)):
+    """Second-order ARX per horizontal axis pair: v[k+1] = a1 v[k] + a2 v[k-1] + b u[k-n].
+    Reports natural frequency, damping, dead time and steady-state gain b / (1 - a1 - a2):
+    a gain != 1 means PX4 achieves a multiple of the command (e.g. a velocity-estimate scale error)."""
+    tg = np.arange(t[0], t[-1], dt)
+    U = np.stack([np.interp(tg, t, u[:, k]) for k in range(3)], 1)
+    V = np.stack([np.interp(tg, t, v[:, k]) for k in range(3)], 1)
+    best = None
+    for d in delays:
+        n = int(round(d / dt))
+        rows, y = [], []
+        for k in (0, 1):
+            m = len(V) - 1
+            idx = np.arange(max(1, n), m)
+            rows.append(np.stack([V[idx, k], V[idx - 1, k], U[idx - n, k]], 1))
+            y.append(V[idx + 1, k])
+        X, Y = np.concatenate(rows), np.concatenate(y)
+        if len(Y) < 50:
+            continue
+        theta, *_ = np.linalg.lstsq(X, Y, rcond=None)
+        r = float(np.mean((Y - X @ theta) ** 2))
+        if best is None or r < best[0]:
+            best = (r, d, theta)
+    if best is None:
+        return None
+    r, d, (a1, a2, b) = best
+    gain = b / (1 - a1 - a2) if abs(1 - a1 - a2) > 1e-9 else float('inf')
+    poles = np.roots([1.0, -a1, -a2]).astype(complex)
+    s = np.log(poles) / dt
+    wn = float(np.sqrt(abs(s[0] * s[1])))
+    zeta = float(-(s[0] + s[1]).real / (2 * wn)) if wn > 0 else float('nan')
+    print(f'xy 2nd order: wn = {wn:.2f} rad/s, zeta = {zeta:.2f}, t_delay = {d:.2f} s, steady-state gain = '
+          f'{gain:.2f} (residual {r:.2e})')
+    if zeta < 0.7:
+        print('  underdamped: the first-order fit above under-describes this loop; treat tau_v with care')
+    if abs(gain - 1.0) > 0.15:
+        print('  steady-state gain far from 1: the vehicle achieves a multiple of the command (velocity-estimate scale?)')
+    return wn, zeta, d, gain
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('src')
@@ -106,6 +146,7 @@ def main():
     if keep.sum() < 50:
         sys.exit(f'fit_lag: only {int(keep.sum())} samples in states {a.states}: nothing to fit')
     best = fit(data['t'][keep], data['u'][keep], data['v'][keep], a.dt)
+    fit2(data['t'][keep], data['u'][keep], data['v'][keep], a.dt)
     if best:
         print(f'\nconfig/tracker.yaml:  tracker.tau_v: {best[0]:.2f}   tracker.t_delay: {best[1]:.2f}')
 
