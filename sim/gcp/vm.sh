@@ -7,5 +7,5 @@ set -eo pipefail
 SLOT="${1:?usage: vm.sh <slot> <command>}"; shift
 source "$(cd "$(dirname "$0")" && pwd)/vm.env"
 gcloud compute ssh "$VM" --project "$PROJECT" --account "$ACCOUNT" --zone "$ZONE" --quiet -- -t \
-  "cd ~/slot$SLOT/Dronehacks && export SIM_ID=$SLOT ROS_DOMAIN_ID=$((10 + SLOT)) GZ_PARTITION=sim$SLOT && source /opt/ros/humble/setup.bash && $*" 2>&1 |
+  "cd ~/slot$SLOT/Dronehacks && export SIM_ID=$SLOT ROS_DOMAIN_ID=$((10 + SLOT)) GZ_PARTITION=sim$SLOT FASTRTPS_DEFAULT_PROFILES_FILE=~/slot$SLOT/Dronehacks/sim/dds/fastdds_udp.xml && source /opt/ros/humble/setup.bash && $*" 2>&1 |
   grep -v "host keys"

@@ -30,12 +30,19 @@ param set-default EKF2_EVA_NOISE 0.05
 # No optical flow. (08)
 param set-default EKF2_OF_CTRL 0
 
+# Compass off. On the drone the mag is configured (EKF2_MAG_TYPE 0) but never fused indoors
+# (cs_mag_hdg false, "strong magnetic interference", skybeta CLAUDE.md "Drone 16"); heading comes from
+# EV yaw. The sim's clean mag field instead fights the FRD EV heading and blocks arming.
+param set-default EKF2_MAG_TYPE 5
+param set-default SYS_HAS_MAG 0
+
 # Lockstep sim: keep PX4 timestamps on sim time (see skybeta sim/px4_sitl.env).
 param set-default UXRCE_DDS_SYNCT 0
 
-# No RC transmitter in sim: sim/pilot.py plays the safety pilot over MAVLink
-# (arm, then switch to Position, exactly the drone's go signal).
-param set-default COM_RC_IN_MODE 4
+# No RC hardware in sim: sim/rc.py is the transmitter (centred sticks over MAVLink MANUAL_CONTROL,
+# always on, like the safety pilot's radio) and sim/pilot.py the pilot (arm, then Position = go).
+# COM_RC_IN_MODE 1 = manual control from MAVLink (the drone uses 0 = RC transmitter).
+param set-default COM_RC_IN_MODE 1
 param set-default COM_RCL_EXCEPT 4
 param set-default NAV_RCL_ACT 0
 param set-default NAV_DLL_ACT 0

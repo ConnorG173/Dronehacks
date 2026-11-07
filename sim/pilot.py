@@ -10,17 +10,22 @@ treats that as the go signal and enters Offboard once. This does the same in sim
     python3 sim/pilot.py --sim 0 status    # mode, armed
 --sim N talks to PX4 instance N on its own GCS port (18570 + N), so two sims never cross.
 """
+import socket
 import sys
 import time
 
 from pymavlink import mavutil
 
-PX4_MAIN_MODE = {"position": 3, "land": None}
+PX4_MAIN_MODE = {"altitude": 2, "position": 3}
 
 
 def connect(sim_id, timeout=30):
     url = f"udpout:127.0.0.1:{18570 + sim_id}"
     m = mavutil.mavlink_connection(url, source_system=255)
+    # PX4 locks its GCS link onto the first partner address it hears from, so always use the same local
+    # port per slot; a fresh ephemeral port per run would never get replies after the first run.
+    m.port.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    m.port.bind(("127.0.0.1", 24550 + sim_id))
     t0 = time.time()
     hb = None
     while hb is None and time.time() - t0 < timeout:
@@ -61,6 +66,27 @@ def set_px4_mode(m, main_mode, sub_mode=0):
                    mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED, main_mode, sub_mode)
 
 
+def current_mode(m, timeout=2):
+    hb = m.recv_match(type="HEARTBEAT", blocking=True, timeout=timeout)
+    return m.flightmode if hb else None
+
+
+def ensure_mode(m, main_mode, name, timeout=15, also_ok=()):
+    """Send DO_SET_MODE until PX4's heartbeat reports the mode (acks can be lost or late).
+    also_ok: modes that count as success. Needed for Position: the flight interface moves PX4 on to
+    OFFBOARD within ~70 ms of the switch, and re-requesting Position would yank it back out."""
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        set_px4_mode(m, main_mode)
+        for _ in range(3):
+            mode = current_mode(m)
+            if mode == name or mode in also_ok:
+                print(f"mode is {mode}")
+                return True
+        time.sleep(0.5)
+    return False
+
+
 def status(m):
     hb = m.recv_match(type="HEARTBEAT", blocking=True, timeout=3)
     armed = bool(hb.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED) if hb else None
@@ -81,10 +107,20 @@ def main():
     elif what == "go":
         if not wait_position_valid(m):
             sys.exit("EKF never reported a valid position: is cuVSLAM tracking and the bridge running?")
-        if not command(m, mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM, 1):
-            sys.exit("arming refused (see PX4 console)")
+        # The flight interface's go signal is a *switch into* Position after arming. PX4 sits in Position by
+        # default, so first select Altitude (main mode 2) like a pilot with the switch down, arm there, then flip.
+        if not ensure_mode(m, PX4_MAIN_MODE["altitude"], "ALTCTL"):
+            sys.exit("PX4 never switched to Altitude")
+        # Preflight checks flap for a few seconds after start (accel bias, position stability), so retry
+        # like a pilot would: every 2 s for up to 90 s.
+        t0 = time.time()
+        while not command(m, mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM, 1):
+            if time.time() - t0 > 90:
+                sys.exit("arming refused for 90 s (see: SIM_ID=N bash sim/tools/px4_cmd.sh commander check)")
+            time.sleep(2)
         time.sleep(0.5)
-        set_px4_mode(m, PX4_MAIN_MODE["position"])
+        if not ensure_mode(m, PX4_MAIN_MODE["position"], "POSCTL", also_ok=("OFFBOARD",)):
+            sys.exit("PX4 never switched to Position")
         status(m)
     elif what == "land":
         command(m, mavutil.mavlink.MAV_CMD_NAV_LAND)

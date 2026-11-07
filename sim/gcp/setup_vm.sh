@@ -25,6 +25,12 @@ dpkg -s "libnvidia-gl-${DRV_VER}-server" >/dev/null 2>&1 || { wait_apt; sudo apt
 sudo usermod -aG video,render "$USER"
 ls /usr/share/glvnd/egl_vendor.d/
 
+step "kernel UDP buffers (each sim slot moves ~180 MB/s of camera images over loopback DDS)"
+# Linux caps socket buffers at net.core.rmem_max (~200 KB default), whatever Fast DDS asks for. Small buffers
+# drop packets under load, including the flight interface's Offboard heartbeat -> PX4 leaves Offboard.
+printf 'net.core.rmem_max=67108864\nnet.core.wmem_max=67108864\nnet.core.rmem_default=33554432\nnet.core.wmem_default=33554432\nnet.ipv4.ipfrag_high_thresh=134217728\n' | sudo tee /etc/sysctl.d/90-dronehacks-dds.conf >/dev/null
+sudo sysctl -q --system
+
 step "docker + nvidia container toolkit"
 if ! command -v docker >/dev/null; then
   curl -fsSL https://get.docker.com | sudo sh

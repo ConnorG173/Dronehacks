@@ -9,10 +9,12 @@ PX4_BUILD="$PX4_DIR/build/px4_sitl_default"
 SKYBETA_DIR="${SKYBETA_DIR:-$HOME/skybeta}"
 WORLD="${WORLD:-dronehacks_course}"
 # Spawn pose x,y,z,roll,pitch,yaw in the map frame: the launch mark (planner StartPos), facing +x.
-POSE="${POSE:--2.5146,0.9144,0.25,0,0,0}"
+CAMERA_X=0.12; CAMERA_Z=0.242   # stereo rig in base_link (sim/gz/models/skybeta/model.sdf oak_link)
+POSE="${POSE:--2.5146,0.9144,0.0,0,0,0}"   # z=0: rest on the floor; a drop at spawn corrupts EKF2 tilt alignment
 
 export ROS_DOMAIN_ID="$((10 + SIM_ID))"
 export GZ_PARTITION="sim${SIM_ID}"
+export FASTRTPS_DEFAULT_PROFILES_FILE="$REPO/sim/dds/fastdds_udp.xml"   # see that file: no SHM across the container boundary
 XRCE_PORT="$((8888 + SIM_ID))"
 MAV_PORT="$((18570 + SIM_ID))"          # PX4's GCS link for this instance (sim/pilot.py talks here)
 FOXGLOVE_PORT="$((8765 + SIM_ID))"

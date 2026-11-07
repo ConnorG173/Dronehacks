@@ -1,17 +1,17 @@
 # Session: localization
 
-Read `docs/CONTRACTS.md` first. You own `/team/odom_map`, TF `map → odom`, and `/team/loc/status`.
+Read `docs/CONTRACTS.md` first. You own `/team/odom_map`, TF `course → map`, and `/team/loc/status`.
 
 ## Goal
 
-A pose in the course `map` frame that stays accurate for the whole run (window, landing ring, return to
+A pose in the `course` frame that stays accurate for the whole run (window, landing ring, return to
 within 2 ft of launch all depend on it), never stalls, and says honestly when it is degraded.
 
 ## Starting point
 
 cuVSLAM is already running on the drone and feeding PX4. Treat it as the motion source (good short-term,
 drifts long-term) and add **drift correction against the known map**. Don't replace what PX4 uses: your
-correction lives in `map → odom` only.
+correction lives in `course → map` only.
 
 ## Proven open-source options (experiment, keep what measures best)
 
@@ -22,7 +22,7 @@ Drift correction, pick one first, compare others later:
   or scan-to-map ICP. Cheap, robust in corridors, walls are 68 in tall so a horizontal slice always hits them.
 - **3D registration:** depth point cloud → [small_gicp](https://github.com/koide3/small_gicp) against the course
   point cloud `planner/maps/course_v3.bin`. Pattern: [small_gicp_relocalization](https://github.com/Alex10086/small_gicp_relocalization)
-  publishes `map → odom` from exactly this.
+  publishes a map-to-odom correction from exactly this.
 - **Visual landmarks:** detect course features (gates, window, tunnel mouth, pad) with
   [Ultralytics YOLO](https://github.com/ultralytics/ultralytics) trained on renders of the course model, then
   bearing/PnP measurements into the filter. This is what top racing teams do
@@ -62,7 +62,7 @@ Keep a results table in `docs/results/localization.md`.
 > You are the localization workstream for our Stanford DroneHacks 2026 team.
 > Read `docs/CONTRACTS.md` and `docs/sessions/localization.md` in this repo, then `docs/SIM.md`.
 > Build ROS 2 Humble packages under `src/` that take cuVSLAM odometry and correct its drift against the
-> known course map, publishing `/team/odom_map`, TF `map → odom` and `/team/loc/status` exactly as the
+> known course map, publishing `/team/odom_map`, TF `course → map` and `/team/loc/status` exactly as the
 > contracts say. Ship milestone 1 (the republisher) first so path following is unblocked. Use the proven
 > open-source libraries in the doc rather than writing estimators from scratch, and measure every method
 > against Gazebo ground truth on the GCP sim (your slot is 1), recording results in `docs/results/localization.md`.

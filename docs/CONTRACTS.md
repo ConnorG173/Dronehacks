@@ -26,34 +26,35 @@ This file is the only thing they share. Change it only with both sides agreeing.
 
 | Frame | Meaning |
 |---|---|
-| `map` | The planner's course frame (`planner/README.md` "Frames"): metres, right-handed, z up, origin = centre of the 20 × 20 ft cage floor, x = east. Launch mark ≈ (-2.51, 0.91). |
+| `course` | The planner's course frame (`planner/README.md` "Frames"): metres, right-handed, z up, origin = centre of the 20 × 20 ft cage floor, x = east. Launch mark ≈ (-2.51, 0.91). Named `course`, not `map`, because cuVSLAM already publishes its own `map` frame and TF `map → odom` on the drone (agreed 2026-11-07). |
+| `map` | cuVSLAM's SLAM frame. Owned by the organizer stack; don't publish it. |
 | `odom` | cuVSLAM's frame. Origin = where the stack started (drone sitting on the launch mark). Drifts. |
 | `base_link` | Drone body, FLU. |
 
-At start, `map → odom` = the launch pose (`StartPos`, `StartHeadingDeg` in the course config).
-Localization's job is to keep `map → odom` correct as `odom` drifts. Path following plans in `map`
+At start, `course → map` = the launch pose (`StartPos`, `StartHeadingDeg` in the course config), anchored on the pad.
+Localization's job is to keep `course → map` correct as cuVSLAM drifts. Path following plans in `course`
 and converts to `odom`/ENU for setpoints, so drift correction never touches PX4 or the organizer stack.
 
 ## Topics
 
 | Topic | Type | Owner | Notes |
 |---|---|---|---|
-| `/team/odom_map` | `nav_msgs/Odometry` | localization | Pose in `map`, twist in `base_link`. ≥ 30 Hz, low latency (republish every VIO message with the latest correction). Covariance filled. |
-| TF `map → odom` | tf2 | localization | Same correction as above. |
+| `/team/odom_map` | `nav_msgs/Odometry` | localization | Pose in `course` (`header.frame_id: course`), twist in `base_link`. ≥ 30 Hz, low latency (republish every VIO message with the latest correction). Covariance filled. |
+| TF `course → map` | tf2 | localization | Same correction as above. |
 | `/team/loc/status` | `diagnostic_msgs/DiagnosticStatus` | localization | `OK` / `WARN` (degraded, e.g. VIO quality low) / `ERROR` (lost). Path following slows on WARN. |
-| `/team/plan/path` | `nav_msgs/Path` | path following | Full planned path in `map` (for RViz/Foxglove and debugging). |
+| `/team/plan/path` | `nav_msgs/Path` | path following | Full planned path in `course` (for RViz/Foxglove and debugging). |
 | `/team/mission/state` | `std_msgs/String` | path following | `idle`, `takeoff`, `course`, `landing`, `landed`, `return`, `done`, `abort`. |
 | `/skybeta/setpoint/*` | see above | path following | Only path following publishes setpoints. |
 
 Fallback so neither side blocks the other: until localization publishes `/team/odom_map`,
-path following uses `/visual_slam/tracking/odometry` plus the static launch pose as `map → odom`.
+path following uses `/visual_slam/tracking/odometry` plus the static launch pose as `course → odom`.
 
 ## The map (already in the repo: `planner/`)
 
 The published layout is the map (allowed by rule 6.4). Source of truth:
 
 - `dronehacks-course-v3.step`: the organizers' course CAD (mm, z up).
-- `planner/maps/course_v3.bin`: occupied surface points in the map frame (DHMAP format,
+- `planner/maps/course_v3.bin`: occupied surface points in the `course` frame (DHMAP format,
   `planner/README.md`), made by `planner/tools/cad_to_map.py`. Localization can register against
   these points directly, or rasterize a 2D slice at flight height.
 - `planner/config/course_v3.yaml`: start pose, ordered checkpoints, goal, limits. The checkpoint list
@@ -78,7 +79,7 @@ Two simulators exist; use both for different things.
 
 - **Our Gazebo sim on GCP** (`docs/SIM.md`): Gazebo Harmonic + PX4 v1.16.2 SITL (the drone's firmware)
   + the organizers' own `skybeta` stack container, so cuVSLAM and **the same flight interface as the
-  drone** are in the loop. Anyone can run it in parallel. Ground truth: `/sim/ground_truth/odom`.
+  drone** are in the loop. Anyone can run it in parallel. Ground truth: `/sim/ground_truth/odom` (frame_id `course`, base_link pose, 100 Hz).
 - **The organizers' cloud lab** (this repo's `AI_CONTEXT.md`): Sky Beta in the prepared course, ROS 2
   Jazzy, its own companion code (`refnav/`, `onboard/`) that talks to `/fmu/in/*` directly, one
   teammate in control at a time. Good for visual realism; it does not run the drone's flight interface.
