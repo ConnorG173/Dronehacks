@@ -15,7 +15,8 @@ of that and clamps altitude. Like square_mission: waits for offboard_active (the
 then switches to Position), and stops advancing if Offboard ends.
 
 States: INIT (needs landed + disarmed, computes T0 on the pad) -> READY (holds the current
-position) -> TAKEOFF (climb to the path start) -> FOLLOW (time-pausing carrot) -> HOLD.
+position) -> TAKEOFF (climb to the path start) -> FOLLOW (PathClock: governed path time, on-path
+lead setpoint, see streamer.py) -> HOLD (the on-path point p(tau), never the lead point).
 """
 import json
 import math
@@ -51,7 +52,10 @@ class PathStreamer(Node):
         P("setpoint_topic", "/localizer/setpoint_preview")
         P("rate_hz", 20.0)
         P("max_path_speed_mps", 1.0)             # the path is played slower to stay under this
-        P("max_tracking_err_m", 0.6)             # carrot pauses beyond this
+        P("mpc_xy_p", 0.95)                      # the drone's MPC_XY_P; the setpoint leads by 1/mpc_xy_p s
+        P("lag_ok_m", 0.3)                       # path clock at full rate below this lag
+        P("max_tracking_err_m", 0.6)             # path clock stopped at or beyond this lag
+        P("clock_slew_per_s", 1.0)               # path clock rate changes by at most this per s
         P("takeoff_radius_m", 0.25)
         P("takeoff_settle_s", 2.0)
         P("fence_margin_m", 0.3)
@@ -71,8 +75,8 @@ class PathStreamer(Node):
             self.cage_half = float(z["cage_half_m"])
         self.path = S.path_to_course(S.load_path(g("path_file")), self.pad_xy, self.pad_yaw)
         self.scale = S.time_scale_for(self.path, float(g("max_path_speed_mps")))
-        self.p = {k: float(g(k)) for k in ("max_tracking_err_m", "takeoff_radius_m", "takeoff_settle_s",
-                                           "fence_margin_m", "jump_m")}
+        self.p = {k: float(g(k)) for k in ("mpc_xy_p", "lag_ok_m", "max_tracking_err_m", "clock_slew_per_s",
+                                           "takeoff_radius_m", "takeoff_settle_s", "fence_margin_m", "jump_m")}
         self.command_yaw = bool(g("command_yaw"))
         self.dt = 1.0 / float(g("rate_hz"))
 
@@ -101,9 +105,11 @@ class PathStreamer(Node):
         self.mode = "INIT"
         self.reason = "waiting for odometry, attitude and /skybeta/state"
         self.T = None
-        self.carrot = None
+        self.clock = None
+        self.sp = None              # last streamer.Setpoint (FOLLOW)
         self.settle_t0 = None
-        self.last_sp = None         # (xy_course, z, yaw_course)
+        self.last_sp = None         # (xy_course, z, yaw_course) that HOLD re-sends: always on the path
+        self.sent_sp = None         # (xy_course, z, yaw_course) last published
         self.err = None
         self.blocked = False
         self.create_timer(self.dt, self.tick)
@@ -185,10 +191,13 @@ class PathStreamer(Node):
             m.pose.orientation.w = 0.0          # all-zero quaternion: do not command yaw
         return m
 
-    def send_course(self, xy_c, z, yaw_c):
-        """Course-frame setpoint -> odom via T^-1 -> setpoint topic. z is height, not transformed."""
+    def send_course(self, xy_c, z, yaw_c, hold=None):
+        """Course-frame setpoint -> odom via T^-1 -> setpoint topic. z is height, not transformed.
+        `hold` (xy, z, yaw) is what HOLD re-sends after a fault; default the setpoint itself."""
         xy_c = S.clamp_to_fence(xy_c, self.cage_half, self.p["fence_margin_m"])
-        self.last_sp = (xy_c, z, yaw_c)
+        self.sent_sp = (xy_c, z, yaw_c)
+        self.last_sp = self.sent_sp if hold is None else (
+            S.clamp_to_fence(hold[0], self.cage_half, self.p["fence_margin_m"]), hold[1], hold[2])
         xy_o, yaw_o = self.T.to_odom(xy_c, yaw_c)
         self.send_odom(xy_o, z, yaw_o if self.command_yaw else None)
 
@@ -232,7 +241,7 @@ class PathStreamer(Node):
                 self.get_logger().info("Offboard active -> TAKEOFF to the path start")
             else:
                 # like square_mission: command where we are, so Offboard starts with a hold
-                self.last_sp = None
+                self.last_sp = self.sent_sp = None
                 self.send_odom(self.odom[1][:2], self.odom[1][2], None)
                 return
 
@@ -246,14 +255,16 @@ class PathStreamer(Node):
             elif self.settle_t0 is None:
                 self.settle_t0 = time.monotonic()
             elif time.monotonic() - self.settle_t0 > self.p["takeoff_settle_s"]:
-                self.carrot = S.Carrot(self.path, self.scale, self.p["max_tracking_err_m"])
+                self.clock = S.PathClock(self.path, self.scale, lead_s=1.0 / self.p["mpc_xy_p"],
+                                         e_ok_m=self.p["lag_ok_m"], e_stop_m=self.p["max_tracking_err_m"],
+                                         r_slew=self.p["clock_slew_per_s"])
                 self.mode, self.reason = "FOLLOW", "following the path"
                 self.get_logger().info("at the path start -> FOLLOW")
             return
 
         if self.mode == "FOLLOW":
             if self.dry_run:
-                xy, z, _ = self.path.at(self.carrot.tau)
+                xy, z, _ = self.path.at(self.clock.tau)
                 veh = np.r_[xy, z]
             else:
                 veh = self.vehicle_course()
@@ -261,9 +272,14 @@ class PathStreamer(Node):
                     self.fault(f"vehicle outside the course fence at ({veh[0]:.2f}, {veh[1]:.2f})")
                     self.send_course(*self.last_sp)
                     return
-            (xy, z, yaw), self.err = self.carrot.step(self.dt, veh)
-            self.send_course(xy, z, yaw)
-            if self.carrot.done:
+            sp = self.sp = self.clock.step(self.dt, veh)
+            self.err = sp.err
+            # send the on-path lead point; a fault holds p(tau), the point the vehicle should be at
+            # HALF-ASSED: position only (flight_interface drops velocity/acceleration), so the lead
+            # point stands in for the feedforward; it assumes the drone's MPC_XY_P (parameter).
+            self.send_course(sp.q[:2], sp.q[2], sp.yaw,
+                             hold=(sp.p[:2], sp.p[2], self.path.at(sp.tau)[2]))
+            if self.clock.done:
                 self.mode, self.reason = "HOLD", "path complete - holding the goal; pilot lands"
                 self.get_logger().info(self.reason)
             return
@@ -297,13 +313,16 @@ class PathStreamer(Node):
               "T": None if self.T is None else [round(self.T.x, 3), round(self.T.y, 3),
                                                 round(math.degrees(self.T.yaw), 2)],
               "path_s": round(self.path.duration, 2), "time_scale": round(self.scale, 3),
-              "tau": None if self.carrot is None else round(self.carrot.tau, 2),
-              "carrot_paused": None if self.carrot is None else self.carrot.paused,
+              "tau": None if self.clock is None else round(self.clock.tau, 2),
+              "clock_rate": None if self.sp is None else round(self.sp.rate, 3),
+              "clock_stalled": None if self.clock is None else self.clock.stalled,
+              "lag_m": None if self.sp is None else round(self.sp.lag, 3),
+              "lead_m": None if self.sp is None else round(float(np.linalg.norm(self.sp.q - self.sp.p)), 3),
               "err_m": None if self.err is None else round(self.err, 3), "vo_state": self.vo_state}
         if self.T is not None and self.fresh(self.odom):
             st["vehicle_course"] = [round(v, 3) for v in self.vehicle_course()]
-        if self.last_sp is not None:
-            xy, z, yaw = self.last_sp
+        if self.sent_sp is not None:
+            xy, z, yaw = self.sent_sp
             xy_o, yaw_o = self.T.to_odom(xy, yaw)
             st["setpoint_course"] = [round(float(xy[0]), 3), round(float(xy[1]), 3), round(z, 3)]
             # what flight_interface will send (unanchored): NED = (y_enu, x_enu, -z), yaw = pi/2 - yaw
