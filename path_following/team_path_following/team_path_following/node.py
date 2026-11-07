@@ -31,7 +31,7 @@ from .clearance import ClearanceMap
 from .course import load_course, read_dhmap
 from .mission import Inputs, Mission, MissionParams, IDLE
 from .pathfile import Trajectory
-from .planner_runner import run_planner
+from .planner_runner import plan_best
 from .tracker import TrackerParams
 
 try:
@@ -83,7 +83,8 @@ class MissionTracker(Node):
         d('path_file', '')                 # skip planning and fly this DHPATH file
         d('planner_binary', '')
         d('planner_overrides', 'MaxVelMag=1.2')   # "Key=value;Key=value"
-        d('planner_attempts', 3)
+        d('planner_candidates', 3)          # keep the fastest of N validated plans
+        d('planner_budget_s', 45.0)
         d('out_dir', '/tmp/team_path_following')
         d('time_scale', 1.0)               # >1 slows the loaded plan uniformly
         d('control_rate_hz', 50.0)
@@ -183,9 +184,10 @@ class MissionTracker(Node):
                 for kv in filter(None, (s.strip() for s in self.gp('planner_overrides').split(';'))):
                     k, v = kv.split('=', 1)
                     overrides[k.strip()] = v.strip()
-                path_file, summary = run_planner(
+                path_file, summary = plan_best(
                     self.gp('planner_binary'), self.course.path, self.gp('out_dir'), overrides,
-                    attempts=int(self.gp('planner_attempts')), log=self.get_logger().info)
+                    candidates=int(self.gp('planner_candidates')), budget_s=float(self.gp('planner_budget_s')),
+                    log=self.get_logger().info)
                 self.get_logger().info(summary)
             traj = Trajectory.load(path_file, self.course)
             if self.gp('time_scale') != 1.0:

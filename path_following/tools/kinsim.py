@@ -53,6 +53,7 @@ class SimParams:
     att_tau: float = 0.08             # thrust-vector response
     drag: float = 0.25                # 1/s linear drag
     yaw_tau: float = 0.15
+    takeoff_ramp_s: float = 3.0       # MPC_TKO_RAMP_T: vertical setpoint ramps in after liftoff
     link_delay_s: float = 0.02        # DDS + uXRCE to PX4
     # VIO
     odom_hz: float = 30.0
@@ -93,7 +94,16 @@ class Px4Model:
         if self.landed and v_sp[2] <= 0.05:
             self.i[:] = 0.0
             self.v[:] = 0.0
+            self.t_takeoff = None
             return
+        if self.landed and not self.flew:
+            if getattr(self, 't_takeoff', None) is None:
+                self.t_takeoff = t
+            ramp = min(1.0, (t - self.t_takeoff) / max(sp.takeoff_ramp_s, 1e-3))
+            v_sp = np.array([v_sp[0] * ramp, v_sp[1] * ramp, v_sp[2] * ramp])
+        elif getattr(self, 't_takeoff', None) is not None and t - self.t_takeoff < sp.takeoff_ramp_s:
+            ramp = (t - self.t_takeoff) / sp.takeoff_ramp_s
+            v_sp = np.array([v_sp[0], v_sp[1], v_sp[2] * ramp if v_sp[2] > 0 else v_sp[2]])
         e = v_sp - self.v
         kp = np.array([sp.xy_p, sp.xy_p, sp.z_p])
         ki = np.array([sp.xy_i, sp.xy_i, sp.z_i])
@@ -160,6 +170,7 @@ def run(course, traj, tracker_params=None, mission_params=None, sim=None, cleara
     log = []
     cps_hit = []
     cp_next = 0
+    cp_miss = [float('inf')] * len(course.checkpoints)   # closest approach outside each box
     min_clear = float('inf')
     touches = 0
     touching = False
@@ -212,7 +223,7 @@ def run(course, traj, tracker_params=None, mission_params=None, sim=None, cleara
             if record:
                 d = out.debug
                 log.append([t, *px4.p, *px4.v, d.get('tau', np.nan), d.get('taudot', np.nan),
-                            d.get('e_cross', np.nan), *(d.get('p_ref', [np.nan] * 3)),
+                            d.get('e_cross', np.nan), *(d.get('p_ref', [np.nan] * 3)), *out.v,
                             ['idle', 'takeoff', 'course', 'landing', 'landed', 'done', 'abort'].index(out.state)])
             if mission.state in (DONE, ABORT):
                 break
@@ -249,6 +260,10 @@ def run(course, traj, tracker_params=None, mission_params=None, sim=None, cleara
             xt = path_distance(traj, px4.p, mission.tracker.tau)
             max_xt = max(max_xt, xt)
             xt_sq.append(xt * xt)
+        if mission.state in (COURSE, LANDING):
+            for k, b in enumerate(course.checkpoints):
+                out = np.maximum(np.abs(px4.p - b.center) - b.half, 0.0)
+                cp_miss[k] = min(cp_miss[k], float(np.linalg.norm(out)))
         if mission.state in (COURSE, LANDING) and cp_next < len(course.checkpoints):
             if course.checkpoints[cp_next].contains(px4.p):
                 cps_hit.append(t)
@@ -269,6 +284,7 @@ def run(course, traj, tracker_params=None, mission_params=None, sim=None, cleara
         plan_min_clear_m=round(float(np.min(clearance.distance(traj.p))), 3),
         touches=touches,
         checkpoints=f'{cp_next}/{len(course.checkpoints)}',
+        cp_worst_miss_m=round(max(cp_miss), 3) if cp_miss else 0.0,
         clamped_ticks=clamped,
         land_err_m=round(land_err, 3),
         disarmed=not px4.armed,
@@ -311,6 +327,7 @@ def main():
     ap.add_argument('--set', action='append', default=[], help='tracker/sim/mission param, e.g. kc=1.5 or sim.setpoint_rate_hz=50')
     ap.add_argument('--plot')
     ap.add_argument('--json', action='store_true')
+    ap.add_argument('--npz', help='save t, u (commanded), v (true), state for fit_lag.py')
     a = ap.parse_args()
     course = load_course(a.course)
     traj = Trajectory.load(a.path, course)
@@ -328,12 +345,15 @@ def main():
             target, k = mp, k[8:]
         cur = getattr(target, k)
         setattr(target, k, type(cur)(v) if not isinstance(cur, str) else v)
-    if sim.max_speed_mps - 0.1 < tp.v_max and not any(kv.startswith('v_max') for kv in a.set):
+    if not any(kv.startswith('v_max') for kv in a.set):
         tp.v_max = sim.max_speed_mps - 0.1
-    res = run(course, traj, tp, mp, sim, record=bool(a.plot))
+    res = run(course, traj, tp, mp, sim, record=bool(a.plot or a.npz))
+    if a.npz:
+        lg = res['log']
+        np.savez(a.npz, t=lg[:, 0], v=lg[:, 4:7], u=lg[:, 13:16], state=lg[:, -1])
     if a.plot:
         plot(course, traj, res, a.plot)
-        res.pop('log')
+    res.pop('log', None)
     print(json.dumps(res) if a.json else '\n'.join(f'{k:16s} {v}' for k, v in res.items()))
 
 

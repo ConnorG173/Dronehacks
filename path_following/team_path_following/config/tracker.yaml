@@ -23,6 +23,8 @@ mission_tracker:
     tracker.taudot_acc: 1.0
     tracker.k_yaw: 1.5
     tracker.yaw_mode: path
-    mission.takeoff_vz: 0.6
-    mission.land_vz: 0.5
+    mission.takeoff_vz: 1.0          # PX4's 3 s takeoff ramp (MPC_TKO_RAMP_T) dominates anyway
+    mission.settle_time: 0.3
+    mission.course_start_dz: 0.15    # start the course this close to hover height
+    mission.land_vz: 0.8
     mission.land_vz_slow: 0.2

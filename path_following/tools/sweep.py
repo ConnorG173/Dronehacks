@@ -55,6 +55,8 @@ def run_point(course, traj, clear, settings, seeds):
     return dict(
         ok=ok,
         course_s=round(float(np.mean([r['course_time_s'] for r in rows])), 2),
+        mission_s=round(float(np.mean([r['mission_time_s'] for r in rows])), 2),
+        land_err=max(r['land_err_m'] for r in rows),
         max_xt=max(r['max_xt_m'] for r in rows),
         rms_xt=round(float(np.mean([r['rms_xt_m'] for r in rows])), 3),
         min_clear=min(r['min_clear_m'] for r in rows),
@@ -83,7 +85,7 @@ def main():
     names = [k for k, _ in axes]
     out = []
     print(f'plan {traj.duration:.2f} s')
-    header = names + ['ok', 'course_s', 'max_xt', 'rms_xt', 'min_clear', 'touches', 'clamped']
+    header = names + ['ok', 'mission_s', 'land_err', 'course_s', 'max_xt', 'rms_xt', 'min_clear', 'touches', 'clamped']
     print('  '.join(f'{h:>9s}' for h in header))
     for combo in itertools.product(*[v for _, v in axes]):
         settings = base + list(zip(names, combo))

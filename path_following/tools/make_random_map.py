@@ -54,7 +54,11 @@ def make(seed):
     for y in (-W / 2 - t, W / 2):
         pts.append(wall(-L / 2, L / 2, y, y + t, 0.0, H))
     n_walls = int(rng.integers(2, 5))
-    xs = np.linspace(-L / 2, L / 2, n_walls + 2)[1:-1] + rng.uniform(-0.3, 0.3, n_walls)
+    # walls keep >= 1.3 m from the start and goal ends, >= 1 m apart
+    xs = np.linspace(-L / 2 + 1.3, L / 2 - 1.3, n_walls) if n_walls > 1 else np.array([0.0])
+    if n_walls > 1 and (xs[1] - xs[0]) < 1.0:
+        n_walls = max(1, int((L - 2.6) // 1.0) + 1)
+        xs = np.linspace(-L / 2 + 1.3, L / 2 - 1.3, n_walls)
     cps = []
     for x in xs:
         if rng.random() < 0.7:   # full-height gap
@@ -63,9 +67,9 @@ def make(seed):
             hole = (gy - gw / 2, gy + gw / 2, -1.0, H + 1.0)
             cps.append((x + t / 2, gy, fly_z, 0.10, min(0.15, gw / 2 - 0.35), 0.25))
         else:                     # window
-            ws = rng.uniform(0.85, 1.0)
+            ws = rng.uniform(1.0, 1.2)
             gy = rng.uniform(-W / 2 + 0.4 + ws / 2, W / 2 - 0.4 - ws / 2)
-            hole = (gy - ws / 2, gy + ws / 2, fly_z - ws / 2, fly_z + ws / 2)
+            hole = (gy - ws / 2, gy + ws / 2, max(0.3, fly_z - ws / 2), fly_z + ws / 2)
             cps.append((x + t / 2, gy, fly_z, 0.08, 0.08, 0.10))
         pts.append(wall(x, x + t, -W / 2, W / 2, 0.0, H, hole))
     pts = np.concatenate(pts)

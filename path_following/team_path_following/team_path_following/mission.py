@@ -19,15 +19,16 @@ FLYING = (TAKEOFF, COURSE, LANDING, LANDED)
 
 @dataclass
 class MissionParams:
-    takeoff_vz: float = 0.6        # m/s max climb
+    takeoff_vz: float = 1.0        # m/s max climb
     takeoff_vxy: float = 0.3       # m/s max horizontal correction during takeoff
     settle_tol: float = 0.12       # m position error to call the hover settled
     settle_speed: float = 0.15     # m/s
-    settle_time: float = 0.8       # s inside tolerance before the course starts
+    settle_time: float = 0.3       # s inside tolerance before the course starts
     settle_max: float = 4.0        # s after reaching height: start anyway
+    course_start_dz: float = 0.15   # m: >0 starts the course once this close to hover height (no settle)
     arrive_tol: float = 0.20       # m at the goal before landing
     finish_wait_max: float = 4.0   # s after the clock ends: land anyway
-    land_vz: float = 0.5           # m/s descent
+    land_vz: float = 0.8           # m/s descent
     land_vz_slow: float = 0.2      # m/s final descent
     land_slow_height: float = 0.4  # m above the pad: switch to slow
     land_vxy: float = 0.3
@@ -121,7 +122,9 @@ class Mission:
                 self.t_settled = self.t_settled or s.now
             else:
                 self.t_settled = None
-            if (self.t_settled is not None and s.now - self.t_settled >= p.settle_time) or \
+            early = p.course_start_dz > 0.0 and abs(hover[2] - pos[2]) < p.course_start_dz \
+                and float(np.linalg.norm((hover - pos)[:2])) < p.settle_tol
+            if early or (self.t_settled is not None and s.now - self.t_settled >= p.settle_time) or \
                (self.t_height is not None and s.now - self.t_height >= p.settle_max):
                 self.tracker.reset(tau=0.0)
                 self._go(s.now, COURSE)

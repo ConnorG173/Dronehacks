@@ -37,3 +37,41 @@ def run_planner(binary, config, out_dir, overrides=None, attempts=3, timeout_s=6
             return path_bin, last
         log(f'planner attempt {k + 1}/{attempts} failed: {last.strip().splitlines()[-1:] or "?"}')
     raise RuntimeError(f'planner failed {attempts} times: {shlex.join(cmd)}\n{last}')
+
+
+def plan_duration(path_bin):
+    """Total duration of a DHPATH file (last row's t)."""
+    from .pathfile import read_dhpath
+    rows, _ = read_dhpath(path_bin)
+    return float(rows[-1, 0])
+
+
+def plan_best(binary, config, out_dir, overrides=None, candidates=3, budget_s=45.0,
+              wrapper=None, log=print):
+    """Run the (randomised) planner up to `candidates` successful times within `budget_s`
+    and keep the fastest validated plan as out_dir/path.bin. Every candidate already
+    passed the planner's own validation, so picking the shortest is safe."""
+    import shutil
+    t0 = time.monotonic()
+    best, best_t, summary, n_ok, errors = None, float('inf'), '', 0, []
+    k = 0
+    while n_ok < max(1, candidates) and (time.monotonic() - t0 < budget_s or best is None) and k < 3 * max(1, candidates):
+        cand = os.path.join(out_dir, f'cand{k}')
+        k += 1
+        try:
+            path, text = run_planner(binary, config, cand, overrides, attempts=1, wrapper=wrapper, log=log,
+                                     timeout_s=max(10.0, budget_s))
+        except (RuntimeError, subprocess.TimeoutExpired) as exc:
+            errors.append(str(exc).splitlines()[0])
+            continue
+        n_ok += 1
+        dur = plan_duration(path)
+        log(f'candidate {k}: {dur:.2f} s')
+        if dur < best_t:
+            best, best_t, summary = path, dur, text
+    if best is None:
+        raise RuntimeError(f'no valid plan in {k} attempts: {errors[-1:] or "?"}')
+    final = os.path.join(out_dir, 'path.bin')
+    shutil.copyfile(best, final)
+    log(f'best of {n_ok} plans: {best_t:.2f} s ({time.monotonic() - t0:.1f} s planning)')
+    return final, summary
