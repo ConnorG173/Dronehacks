@@ -17,7 +17,10 @@ case "${1:-}" in
 start)
     if tmux has-session -t sim 2>/dev/null; then echo "already running (sim.sh stop first)"; exit 1; fi
     tmux new-session -d -s sim -n px4 \
-        "cd ~/PX4-Autopilot && HEADLESS=1 PX4_GZ_WORLD=$WORLD PX4_PARAM_NAV_DLL_ACT=0 make px4_sitl $MODEL; bash"
+        "cd ~/PX4-Autopilot && HEADLESS=1 PX4_GZ_WORLD=$WORLD make px4_sitl $MODEL; bash"
+    # Set after boot: the x500 airframe's set-default 2 overrides a PX4_PARAM_NAV_DLL_ACT=0 env var.
+    for _ in $(seq 90); do tmux capture-pane -p -t sim:px4 | grep -q 'pxh>' && break; sleep 1; done
+    tmux send-keys -t sim:px4 "param set NAV_DLL_ACT 0" Enter
     tmux new-window -t sim -n agent "MicroXRCEAgent udp4 -p 8888; bash"
     tmux new-window -t sim -n clock \
         "source $HERE/env.sh && ros2 run ros_gz_bridge parameter_bridge /clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock; bash"
