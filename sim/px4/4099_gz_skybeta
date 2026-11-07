@@ -39,9 +39,10 @@ param set-default SYS_HAS_MAG 0
 # Lockstep sim: keep PX4 timestamps on sim time (see skybeta sim/px4_sitl.env).
 param set-default UXRCE_DDS_SYNCT 0
 
-# No RC transmitter in sim: sim/pilot.py plays the safety pilot over MAVLink
-# (arm, then switch to Position, exactly the drone's go signal).
-param set-default COM_RC_IN_MODE 4
+# No RC hardware in sim: sim/rc.py is the transmitter (centred sticks over MAVLink MANUAL_CONTROL,
+# always on, like the safety pilot's radio) and sim/pilot.py the pilot (arm, then Position = go).
+# COM_RC_IN_MODE 1 = manual control from MAVLink (the drone uses 0 = RC transmitter).
+param set-default COM_RC_IN_MODE 1
 param set-default COM_RCL_EXCEPT 4
 param set-default NAV_RCL_ACT 0
 param set-default NAV_DLL_ACT 0

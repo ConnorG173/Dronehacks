@@ -13,7 +13,7 @@ docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
 # Killing tmux does NOT stop `gz sim` (it survives SIGHUP). A leftover server in the same partition makes
 # PX4 see two interleaved clocks -> IMU "timestamp error" spam and no estimator. Kill this slot's processes
 # by unique patterns and wait until they are really gone.
-PATTERNS=("gz sim .*$REPO/sim/gz/worlds" "bin/px4 -i $SIM_ID " "sim${SIM_ID}_bridge.yaml" "foxglove.*port:=$FOXGLOVE_PORT")
+PATTERNS=("gz sim .*$REPO/sim/gz/worlds" "bin/px4 -i $SIM_ID " "sim${SIM_ID}_bridge.yaml" "foxglove.*port:=$FOXGLOVE_PORT" "sim/rc.py --sim $SIM_ID")
 for p in "${PATTERNS[@]}"; do pkill -f "$p" 2>/dev/null || true; done
 for _ in $(seq 1 20); do
   alive=0; for p in "${PATTERNS[@]}"; do pgrep -f "$p" >/dev/null && alive=1; done
@@ -36,6 +36,7 @@ sleep 8
 # that never re-converges at rest -> "High Accelerometer Bias" blocks arming. Restart EKF2 once the
 # sensors are clean; afterwards attitude and bias match ground truth.
 tmux new-window -t "$TMUX_SESSION" -n ekfreset "sleep 30; $E bash $REPO/sim/tools/px4_cmd.sh ekf2 stop; sleep 1; $E bash $REPO/sim/tools/px4_cmd.sh ekf2 start; echo 'EKF2 restarted after sensor settle'; bash"
+tmux new-window -t "$TMUX_SESSION" -n rc "python3 $REPO/sim/rc.py --sim $SIM_ID; bash"
 tmux new-window -t "$TMUX_SESSION" -n bridge "$E bash $S/bridge.sh; bash"
 tmux new-window -t "$TMUX_SESSION" -n stack "$E bash $S/stack.sh; bash"
 tmux new-window -t "$TMUX_SESSION" -n foxglove "source /opt/ros/humble/setup.bash && ROS_DOMAIN_ID=$ROS_DOMAIN_ID FASTRTPS_DEFAULT_PROFILES_FILE=$FASTRTPS_DEFAULT_PROFILES_FILE ros2 launch foxglove_bridge foxglove_bridge_launch.xml port:=$FOXGLOVE_PORT; bash"
