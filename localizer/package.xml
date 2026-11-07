@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypenamespace="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>localizer</name>
+  <version>0.1.0</version>
+  <description>Course-frame localization (CAD scan matcher) and path streaming for skybeta.</description>
+  <maintainer email="connorg1@stanford.edu">ConnorG173</maintainer>
+  <license>Proprietary</license>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>message_filters</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>px4_msgs</exec_depend>
+  <exec_depend>skybeta_flight_interface</exec_depend>
+  <exec_depend>competitor_example</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
