@@ -17,7 +17,7 @@
 
     <!-- Downward rangefinder. PX4's gz_bridge reads exactly link "lidar_sensor_link", sensor "lidar". -->
     <link name="lidar_sensor_link">
-      <pose relative_to="base_link">0 0 -0.05 0 1.5708 0</pose>
+      <pose relative_to="base_link">0 0 0.02 0 1.5708 0</pose>  <!-- reads ~0.16 m on the floor: above EKF2_MIN_RNG 0.1 like the drone -->
       <inertial>
         <mass>0.001</mass>
         <inertia><ixx>1e-5</ixx><iyy>1e-5</iyy><izz>1e-5</izz><ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia>

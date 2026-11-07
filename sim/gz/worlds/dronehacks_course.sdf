@@ -13,7 +13,9 @@
       <real_time_update_rate>250</real_time_update_rate>
     </physics>
     <gravity>0 0 -9.8</gravity>
-    <magnetic_field>6e-06 2.3e-05 -4.2e-05</magnetic_field>
+    <!-- Horizontal field along map +x (the spawn heading). PX4 doesn't fuse the compass in this sim
+         (sim/px4/4099_gz_skybeta, matching the drone indoors), so this only matters if someone turns it back on. -->
+    <magnetic_field>2.3e-05 -6e-06 -4.2e-05</magnetic_field>
     <atmosphere type="adiabatic"/>
     <spherical_coordinates>
       <surface_model>EARTH_WGS84</surface_model>
