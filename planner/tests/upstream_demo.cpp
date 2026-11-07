@@ -14,6 +14,11 @@
 //       read from the file instead of planned, so the corridor + optimizer can
 //       be compared bit-for-bit on an identical route.
 
+// Include order matters: upstream headers rely on things global_planning.cpp
+// pulled in earlier (misc/visualizer.hpp -> geo_utils.hpp; ROS -> <cstdint>).
+// gcopter.hpp uses geo_utils without including it; quickhull.hpp uses std::uint8_t.
+#include <cstdint>
+#include "gcopter/geo_utils.hpp"
 #include "gcopter/trajectory.hpp"
 #include "gcopter/gcopter.hpp"
 #include "gcopter/firi.hpp"
@@ -252,6 +257,8 @@ static int runPlan(int argc, char **argv)
         double x, y, z;
         while (rf >> x >> y >> z)
             route.emplace_back(x, y, z);
+        if (route.size() < 2)
+            return std::cerr << "route file " << routePath << " has fewer than 2 points\n", 1;
     }
     const double frontMs = msSince(tFront);
     const auto tCorr = std::chrono::steady_clock::now();

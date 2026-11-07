@@ -87,7 +87,7 @@ namespace geo_utils
     struct filterLess
     {
         inline bool operator()(const Eigen::Vector3d &l,
-                               const Eigen::Vector3d &r)
+                               const Eigen::Vector3d &r) const
         {
             return l(0) < r(0) ||
                    (l(0) == r(0) &&
@@ -149,6 +149,19 @@ namespace geo_utils
             normal = edge0.cross(edge1); //cross in CW gives an outter normal
             rV.col(i) = normal / normal.dot(point);
         }
+        // DroneHacks fix: a (near) zero-area hull face, from duplicate or
+        // near-coplanar planes, gives a NaN, infinite or far-away bogus vertex; a
+        // NaN also makes filterVs collapse every vertex into one. A true vertex
+        // satisfies every inequality of hPoly, so keep only those (NaN fails <=).
+        int nValid = 0;
+        for (int i = 0; i < hNum; i++)
+        {
+            const Eigen::Vector3d v = rV.col(i) + inner;
+            const double slack = (hPoly.leftCols<3>() * v + hPoly.rightCols<1>()).maxCoeff();
+            if (slack <= 1.0e-6 * (1.0 + v.norm()) * hPoly.leftCols<3>().rowwise().norm().maxCoeff())
+                rV.col(nValid++) = rV.col(i);
+        }
+        rV.conservativeResize(3, nValid);
         filterVs(rV, epsilon, vPoly);
         vPoly = (vPoly.array().colwise() + inner.array()).eval();
         return;

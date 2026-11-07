@@ -5,6 +5,11 @@
 // with ROS removed. "upstream:NNN" comments name the matching line there.
 // The only extension is the checkpoint boxes inserted into the corridor.
 
+// Include order matters: upstream headers rely on things global_planning.cpp
+// pulled in earlier (misc/visualizer.hpp -> geo_utils.hpp; ROS -> <cstdint>).
+// gcopter.hpp uses geo_utils without including it; quickhull.hpp uses std::uint8_t.
+#include <cstdint>
+#include "gcopter/geo_utils.hpp"
 #include "gcopter/trajectory.hpp"
 #include "gcopter/gcopter.hpp"
 #include "gcopter/flatness.hpp"
@@ -184,42 +189,6 @@ static bool polysOverlap(Eigen::MatrixX4d a, Eigen::MatrixX4d b)
     return geo_utils::overlap(a, b, 0.01);
 }
 
-// Insert one box per checkpoint into the corridor, in order. Each box goes
-// right after the first polytope j (at or after the previous box) that it
-// overlaps. If it also overlaps polytope j+1 the sequence becomes
-// [.., P_j, box, P_j+1, ..]; otherwise a copy of P_j follows the box:
-// [.., P_j, box, P_j, P_j+1, ..]. Every consecutive pair then overlaps, which is
-// all GCOPTER requires. Returns the number of polytopes added.
-static int insertCheckpoints(std::vector<Eigen::MatrixX4d> &hPolys, const std::vector<Box> &cps)
-{
-    size_t from = 0;
-    int added = 0;
-    for (size_t k = 0; k < cps.size(); k++)
-    {
-        const Eigen::MatrixX4d B = boxPolytope(cps[k]);
-        size_t j = from;
-        while (j < hPolys.size() && !polysOverlap(hPolys[j], B))
-            j++;
-        if (j == hPolys.size())
-            fail("checkpoint " + std::to_string(k + 1) + " at " + fmt(cps[k].c) +
-                 ": box does not overlap the safe corridor after the previous checkpoint. "
-                 "Move it into free space or enlarge its half-extents.");
-        if (j + 1 < hPolys.size() && polysOverlap(B, hPolys[j + 1]))
-        {
-            hPolys.insert(hPolys.begin() + j + 1, B);
-            added += 1;
-        }
-        else
-        {
-            const Eigen::MatrixX4d Pj = hPolys[j];
-            hPolys.insert(hPolys.begin() + j + 1, {B, Pj});
-            added += 2;
-        }
-        from = j + 2; // the polytope after the box
-    }
-    return added;
-}
-
 // ---------------------------------------------------------------------------
 
 static double wrapPi(double a) { return std::atan2(std::sin(a), std::cos(a)); }
@@ -352,9 +321,10 @@ int main(int argc, char **argv)
             fail(names[i] + " " + fmt(wps[i]) +
                  " is inside an obstacle, its DilateRadius margin, or outside MapBound");
 
-    // --- Front end: upstream:146-154, once per leg, routes concatenated ---
+    // --- Front end: upstream:146-154, once per leg ---
     const auto tFront = std::chrono::steady_clock::now();
-    std::vector<Vector3d> route;
+    std::vector<std::vector<Vector3d>> legs;
+    std::vector<Vector3d> route; // all legs, joint points not repeated
     for (size_t i = 0; i + 1 < wps.size(); i++)
     {
         std::vector<Vector3d> leg;
@@ -369,23 +339,54 @@ int main(int argc, char **argv)
             fail("no collision-free route from " + names[i] + " to " + names[i + 1] +
                  " within TimeoutRRT");
         route.insert(route.end(), leg.begin() + (route.empty() ? 0 : 1), leg.end());
+        legs.push_back(leg);
     }
     const double frontMs = msSince(tFront);
+    {
+        // The RRT route (map frame), for debugging and the parity test. Not a path
+        // file: it is written even if the trajectory later fails validation.
+        std::ofstream rt(routeTxt);
+        char line[128];
+        for (const Vector3d &p : route)
+        {
+            std::snprintf(line, sizeof(line), "%.17g %.17g %.17g\n", p(0), p(1), p(2));
+            rt << line;
+        }
+        if (!rt)
+            fail("cannot write " + routeTxt);
+    }
 
-    // --- Corridor: upstream:155-165, then our checkpoint boxes ---
+    // --- Corridor: upstream:155-165 once per leg, legs joined by checkpoint boxes ---
+    // Per leg, so shortCut cannot drop the polytopes of a detour to a checkpoint.
+    // shortCut keeps each leg's first and last polytope, which contain the leg's
+    // endpoints, so box k normally overlaps the end of leg k and the start of leg k+1:
+    //   [leg 1 polytopes] box 1 [leg 2 polytopes] box 2 ... [last leg polytopes]
     const auto tCorr = std::chrono::steady_clock::now();
     std::vector<Eigen::MatrixX4d> hPolys;
     std::vector<Vector3d> pc;
     voxelMap.getSurf(pc);
-    sfc_gen::convexCover(route,
-                         pc,
-                         voxelMap.getOrigin(),
-                         voxelMap.getCorner(),
-                         corridorProgress,
-                         corridorRange,
-                         hPolys);
-    sfc_gen::shortCut(hPolys);
-    const int nAdded = insertCheckpoints(hPolys, cps);
+    for (size_t i = 0; i < legs.size(); i++)
+    {
+        std::vector<Eigen::MatrixX4d> legPolys;
+        sfc_gen::convexCover(legs[i],
+                             pc,
+                             voxelMap.getOrigin(),
+                             voxelMap.getCorner(),
+                             corridorProgress,
+                             corridorRange,
+                             legPolys);
+        sfc_gen::shortCut(legPolys);
+        if (i > 0)
+        {
+            const Eigen::MatrixX4d B = boxPolytope(cps[i - 1]);
+            if (!polysOverlap(hPolys.back(), B) || !polysOverlap(B, legPolys.front()))
+                fail("checkpoint " + std::to_string(i) + " at " + fmt(cps[i - 1].c) +
+                     ": box does not overlap the safe corridor on both sides. "
+                     "Move it into free space or enlarge its half-extents.");
+            hPolys.push_back(B);
+        }
+        hPolys.insert(hPolys.end(), legPolys.begin(), legPolys.end());
+    }
     const double corrMs = msSince(tCorr);
 
     // --- Optimization: upstream:167-221 ---
@@ -426,14 +427,28 @@ int main(int argc, char **argv)
     if (traj.getPieceNum() <= 0)
         fail("optimizer returned an empty trajectory");
     const double optMs = msSince(tOpt);
+    // Machine-readable solver result (parity test), printed before validation so a
+    // rejected trajectory can still be compared with upstream, which has no validation.
+    std::printf("RESULT duration=%.17g front_ms=%.3f corridor_ms=%.3f opt_ms=%.3f\n",
+                traj.getTotalDuration(), frontMs, corrMs, optMs);
+    std::fflush(stdout);
 
-    // --- Validation: the corridor is only a soft penalty, so check the result ---
+    // --- Validation: corridor and limits are only soft penalties, so check the result ---
     // Dense 1 ms samples: never in an occupied (undilated) voxel or outside
-    // MapBound, and inside every checkpoint box, in order.
+    // MapBound, inside every checkpoint box in order, and within the
+    // magnitudeBounds (flatness map as upstream process(), yaw excluded) plus
+    // kLimitTol for the normal soft-penalty overshoot. Comparisons are written
+    // as !(x <= limit) so that NaN fails too.
+    const double kLimitTol = 0.05;
     const double T = traj.getTotalDuration();
+    if (!(T > 0.0) || !std::isfinite(T))
+        fail("optimizer returned a trajectory with duration " + std::to_string(T));
     const Vector3d lo = voxelMap.getOrigin(), hi = voxelMap.getCorner();
     const Eigen::Vector3i size = voxelMap.getSize();
     const std::vector<uint8_t> &vox = voxelMap.getVoxels();
+    flatness::FlatnessMap flatmap;
+    flatmap.reset(vehicleMass, gravAcc, horizDrag, vertDrag, parasDrag, speedEps);
+    double maxSpeed = 0.0, maxTilt = 0.0, maxBdr = 0.0, thrMin = INFINITY, thrMax = -INFINITY;
     std::vector<double> cpTime(cps.size(), NAN);
     size_t nextCp = 0;
     long nMargin = 0;
@@ -442,6 +457,26 @@ int main(int argc, char **argv)
     {
         const double t = std::min(i * 1.0e-3, T);
         const Vector3d p = traj.getPos(t);
+        double thr;
+        Eigen::Vector4d quat;
+        Vector3d omg;
+        flatmap.forward(traj.getVel(t), traj.getAcc(t), traj.getJer(t), 0.0, 0.0, thr, quat, omg);
+        const double speed = traj.getVel(t).norm();
+        const double tilt = std::acos(std::min(1.0, std::max(-1.0, 1.0 - 2.0 * (quat(1) * quat(1) + quat(2) * quat(2)))));
+        const std::string at = " at t=" + std::to_string(t);
+        if (!(speed <= maxVelMag * (1.0 + kLimitTol)))
+            fail("speed " + std::to_string(speed) + " m/s exceeds MaxVelMag" + at);
+        if (!(tilt <= maxTiltAngle * (1.0 + kLimitTol)))
+            fail("tilt " + std::to_string(tilt) + " rad exceeds MaxTiltAngle" + at);
+        if (!(thr >= minThrust * (1.0 - kLimitTol) && thr <= maxThrust * (1.0 + kLimitTol)))
+            fail("thrust " + std::to_string(thr) + " outside MinThrust..MaxThrust" + at);
+        if (!(omg.norm() <= maxBdrMag * (1.0 + kLimitTol)))
+            fail("body rate " + std::to_string(omg.norm()) + " rad/s exceeds MaxBdrMag" + at);
+        maxSpeed = std::max(maxSpeed, speed);
+        maxTilt = std::max(maxTilt, tilt);
+        maxBdr = std::max(maxBdr, omg.norm());
+        thrMin = std::min(thrMin, thr);
+        thrMax = std::max(thrMax, thr);
         if ((p - lo).minCoeff() < 0.0 || (hi - p).minCoeff() <= 0.0)
             fail("trajectory leaves MapBound at t=" + std::to_string(t) + " " + fmt(p));
         const Eigen::Vector3i id = voxelMap.posD2I(p);
@@ -456,30 +491,18 @@ int main(int argc, char **argv)
         fail("trajectory misses checkpoint " + std::to_string(nextCp + 1) + " box at " +
              fmt(cps[nextCp].c) + " (or reaches it out of order)");
 
-    // --- Sample at SampleDt; flatness map for the summary (as upstream process()) ---
+    // --- Sample at SampleDt ---
     std::vector<double> ts;
     for (long i = 0; i * sampleDt < T - 1.0e-9; i++)
         ts.push_back(i * sampleDt);
     ts.push_back(T);
     const size_t N = ts.size();
     std::vector<Vector3d> P(N), V(N), A(N);
-    flatness::FlatnessMap flatmap;
-    flatmap.reset(vehicleMass, gravAcc, horizDrag, vertDrag, parasDrag, speedEps);
-    double maxSpeed = 0.0, maxTilt = 0.0, maxBdr = 0.0, thrMin = INFINITY, thrMax = -INFINITY;
     for (size_t i = 0; i < N; i++)
     {
         P[i] = traj.getPos(ts[i]);
         V[i] = traj.getVel(ts[i]);
         A[i] = traj.getAcc(ts[i]);
-        double thr;
-        Eigen::Vector4d quat;
-        Vector3d omg;
-        flatmap.forward(V[i], A[i], traj.getJer(ts[i]), 0.0, 0.0, thr, quat, omg);
-        maxSpeed = std::max(maxSpeed, V[i].norm());
-        maxTilt = std::max(maxTilt, std::acos(1.0 - 2.0 * (quat(1) * quat(1) + quat(2) * quat(2))));
-        maxBdr = std::max(maxBdr, omg.norm());
-        thrMin = std::min(thrMin, thr);
-        thrMax = std::max(thrMax, thr);
     }
 
     // --- Yaw (map frame, CCW from +x, unwrapped): heading of horizontal
@@ -539,16 +562,9 @@ int main(int argc, char **argv)
         csv << line;
         maxYawRate = std::max(maxYawRate, std::abs(yawRate[i]));
     }
-    std::ofstream rt(routeTxt);
-    char line[128];
-    for (const Vector3d &p : route)
-    {
-        std::snprintf(line, sizeof(line), "%.17g %.17g %.17g\n", p(0), p(1), p(2));
-        rt << line;
-    }
     bin.close();
     csv.close();
-    if (!bin || !csv || !rt ||
+    if (!bin || !csv ||
         std::rename((pathBin + ".tmp").c_str(), pathBin.c_str()) != 0 ||
         std::rename((pathCsv + ".tmp").c_str(), pathCsv.c_str()) != 0)
         fail("error writing output files in " + outDir);
@@ -556,8 +572,8 @@ int main(int argc, char **argv)
     // --- Summary ---
     std::printf("GCOPTER plan OK\n");
     std::printf("  route            : %zu points, %zu legs\n", route.size(), wps.size() - 1);
-    std::printf("  corridor         : %zu polytopes (%d added for %zu checkpoints)\n",
-                hPolys.size(), nAdded, cps.size());
+    std::printf("  corridor         : %zu polytopes (incl. %zu checkpoint boxes)\n",
+                hPolys.size(), cps.size());
     std::printf("  total time       : %.3f s (%d pieces)\n", T, traj.getPieceNum());
     std::printf("  max speed        : %.2f m/s (MaxVelMag %.2f)\n", maxSpeed, maxVelMag);
     std::printf("  max tilt         : %.1f deg (MaxTiltAngle %.1f deg)\n",
@@ -576,7 +592,5 @@ int main(int argc, char **argv)
                 frontMs + corrMs + optMs, frontMs, corrMs, optMs);
     std::printf("  wrote            : %s (%zu rows), %s, %s\n",
                 pathBin.c_str(), N, pathCsv.c_str(), routeTxt.c_str());
-    std::printf("RESULT duration=%.17g front_ms=%.3f corridor_ms=%.3f opt_ms=%.3f\n",
-                T, frontMs, corrMs, optMs);
     return 0;
 }
