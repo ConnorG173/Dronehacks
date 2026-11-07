@@ -219,13 +219,18 @@ def colored_line(ax, xy, speed, norm, cmap, lw):
     return lc
 
 
-def tilt_deg(cfg, v, a):
-    """GCOPTER FlatnessMap::forward thrust direction zu = a + dh/m (1 + cp sqrt(|v|^2 + eps)) v + g z; tilt = angle to z."""
+def thrust_dir(cfg, v, a):
+    """Unit body z (thrust direction) from GCOPTER FlatnessMap::forward: zu = a + dh/m (1 + cp sqrt(|v|^2 + eps)) v + g z."""
     m, g = float(cfg["VehicleMass"][0]), float(cfg["GravAcc"][0])
     dh, cp, eps = float(cfg["HorizDrag"][0]), float(cfg["ParasDrag"][0]), float(cfg["SpeedEps"][0])
     w = 1.0 + cp * np.sqrt((v * v).sum(axis=1) + eps)
     zu = a + (dh / m) * w[:, None] * v + np.array([0.0, 0.0, g])
-    return np.degrees(np.arccos(np.clip(zu[:, 2] / np.linalg.norm(zu, axis=1), -1.0, 1.0)))
+    return zu / np.linalg.norm(zu, axis=1)[:, None]
+
+
+def tilt_deg(cfg, v, a):
+    """Tilt = angle between the thrust direction and map z."""
+    return np.degrees(np.arccos(np.clip(thrust_dir(cfg, v, a)[:, 2], -1.0, 1.0)))
 
 
 def plot(name, cfg, grid, t, p, v, heading, tilt, route, cps, cp_times, start, start_hover, goal, bound, args):
@@ -358,6 +363,32 @@ def plot_name(data):
     return rel.replace(os.sep, "_").replace("/", "_")
 
 
+def load_case(folder, config=None):
+    """Everything for one path folder, map frame: config, voxel grid, path, route, checkpoints."""
+    from types import SimpleNamespace
+    data, cfg_path = find_inputs(folder, config)
+    cfg = load_config(cfg_path)
+    c = SimpleNamespace(data=data, cfg_path=cfg_path, cfg=cfg, name=plot_name(data))
+    c.bound = cfg_nums(cfg, "MapBound", 6)
+    c.start = cfg_nums(cfg, "StartPos", 3)
+    psi0 = math.radians(float(cfg["StartHeadingDeg"][0]))
+    c.start_hover = c.start + np.array([0.0, 0.0, float(cfg["HoverHeight"][0])])
+    c.goal = cfg_nums(cfg, "Goal", 3)
+    c.cps = []
+    for text in cfg.get("Checkpoint", []):
+        v = np.array([float(x) for x in text.split()])
+        c.cps.append((v[:3], v[3:]))
+    c.map_file = resolve(cfg_path, cfg["MapFile"][0])
+    pts = load_map_points(c.map_file)
+    c.npts = len(pts)
+    c.grid = Grid(c.bound, float(cfg["VoxelWidth"][0]), pts, float(cfg["DilateRadius"][0]))
+    c.t, c.p, c.v, c.a, c.heading = path_to_map(load_path(os.path.join(data, "path.bin")), c.start, psi0)
+    c.route = np.loadtxt(os.path.join(data, "route.txt"), ndmin=2)
+    summary = os.path.join(data, "summary.txt")
+    c.summary_text = open(summary).read() if os.path.exists(summary) else ""
+    return c
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("folders", nargs="+")
@@ -375,31 +406,13 @@ def main():
     os.makedirs(args.out_dir, exist_ok=True)
     failed = 0
     for folder in args.folders:
-        data, cfg_path = find_inputs(folder, args.config)
-        cfg = load_config(cfg_path)
-        bound = cfg_nums(cfg, "MapBound", 6)
-        start = cfg_nums(cfg, "StartPos", 3)
-        psi0 = math.radians(float(cfg["StartHeadingDeg"][0]))
-        hover = float(cfg["HoverHeight"][0])
-        goal = cfg_nums(cfg, "Goal", 3)
-        cps = []
-        for text in cfg.get("Checkpoint", []):
-            v = np.array([float(x) for x in text.split()])
-            cps.append((v[:3], v[3:]))
-        args._map_file = resolve(cfg_path, cfg["MapFile"][0])
-        pts = load_map_points(args._map_file)
-        args._npts = len(pts)
-        grid = Grid(bound, float(cfg["VoxelWidth"][0]), pts, float(cfg["DilateRadius"][0]))
-
-        t, p, v, a, heading = path_to_map(load_path(os.path.join(data, "path.bin")), start, psi0)
-        route = np.loadtxt(os.path.join(data, "route.txt"), ndmin=2)
-        summary = os.path.join(data, "summary.txt")
-        summary_text = open(summary).read() if os.path.exists(summary) else ""
+        c = load_case(folder, args.config)
+        cfg, grid, bound, name = c.cfg, c.grid, c.bound, c.name
+        t, p, v, a, heading, route, cps = c.t, c.p, c.v, c.a, c.heading, c.route, c.cps
+        start, start_hover, goal, summary_text = c.start, c.start_hover, c.goal, c.summary_text
+        args._map_file, args._npts = c.map_file, c.npts
         summary_times = [float(m) for m in re.findall(r"reached at t = ([-\d.]+) s", summary_text)]
-
-        name = plot_name(data)
-        print("config %s, map %s" % (cfg_path, args._map_file))
-        start_hover = start + np.array([0.0, 0.0, hover])
+        print("config %s, map %s" % (c.cfg_path, c.map_file))
         nfail, cp_times = run_checks(name, t, p, route, grid, start_hover, goal, cps, summary_times)
         failed += nfail
         tilt = tilt_deg(cfg, v, a)

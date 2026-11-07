@@ -1,0 +1,326 @@
+<!doctype html>
+<!-- Template for tools/view_path.py: __TITLE__ and __DATA__ (JSON) are filled in by the script. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #05080f; color: #cfe8ff;
+               font: 13px/1.4 system-ui, sans-serif; }
+  #panel { position: absolute; top: 10px; left: 10px; width: 300px; padding: 10px 12px;
+           background: rgba(8, 16, 30, 0.88); border: 1px solid #1d3a5c; border-radius: 6px; }
+  #panel h1 { font-size: 14px; margin: 0 0 4px; }
+  #stats { color: #8fb3d9; white-space: pre-line; margin-bottom: 8px; font-size: 12px; }
+  label { display: block; margin: 3px 0; cursor: pointer; }
+  input[type=range] { width: 100%; }
+  .row { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+  button { background: #12375e; color: #cfe8ff; border: 1px solid #2c5d90; border-radius: 4px;
+           padding: 3px 10px; cursor: pointer; }
+  #readout { font-variant-numeric: tabular-nums; color: #8fb3d9; font-size: 12px; }
+  #bar { height: 8px; border-radius: 4px; margin-top: 2px;
+         background: linear-gradient(90deg, #440154, #3b528b, #21918c, #5ec962, #fde725); }
+  .ends { display: flex; justify-content: space-between; font-size: 11px; color: #8fb3d9; }
+  #help { position: absolute; bottom: 8px; left: 10px; color: #5d7a99; font-size: 11px; }
+  #err { position: absolute; top: 40%; width: 100%; text-align: center; color: #ff8080; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+</head>
+<body>
+<div id="panel">
+  <h1 id="title"></h1>
+  <div id="stats"></div>
+  <label><input type="checkbox" id="cbVox" checked> obstacles (occupied voxels)</label>
+  <label><input type="checkbox" id="cbXray"> x-ray obstacles</label>
+  <label><input type="checkbox" id="cbCage" checked> enclosure (nets, roof), see-through</label>
+  <label><input type="checkbox" id="cbGhost" checked> drone every <span id="spVal"></span> m</label>
+  <input type="range" id="spacing" min="0.05" max="2" step="0.05">
+  <label><input type="checkbox" id="cbTraj" checked> trajectory (colour = |v|)</label>
+  <div id="bar"></div><div class="ends"><span>0</span><span id="vmax"></span></div>
+  <label><input type="checkbox" id="cbRoute" checked> RRT route</label>
+  <label><input type="checkbox" id="cbCp" checked> checkpoints, start, goal</label>
+  <div class="row"><button id="play">Play</button>
+    <select id="rate"><option>0.25</option><option>0.5</option><option selected>1</option><option>2</option></select>x</div>
+  <input type="range" id="time" min="0" step="0.01" value="0">
+  <div id="readout"></div>
+</div>
+<div id="help">drag: rotate &middot; right-drag: pan &middot; wheel: zoom &middot; space: play/pause &middot; map frame, z up</div>
+<div id="err"></div>
+<script type="application/json" id="data">__DATA__</script>
+<script>
+  // three.js comes from a CDN; say so if it never loads.
+  setTimeout(() => { if (!window.viewerReady) document.getElementById("err").textContent =
+    "three.js did not load (needs internet: cdn.jsdelivr.net). See the browser console."; }, 8000);
+</script>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+const D = JSON.parse(document.getElementById("data").textContent);
+const $ = id => document.getElementById(id);
+$("title").textContent = D.name;
+$("stats").textContent = D.stats;
+
+// ---------------------------------------------------------------- scene
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x05080f);
+
+const [x0, x1, y0, y1, z0, z1] = D.bound;
+const center = new THREE.Vector3((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+const size = Math.max(x1 - x0, y1 - y0, z1 - z0);
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, size / 2000, size * 20);
+camera.up.set(0, 0, 1);  // map frame is z up
+camera.position.set(center.x - 0.55 * size, center.y - 0.75 * size, center.z + 0.55 * size);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.copy(center);
+controls.update();
+scene.add(new THREE.HemisphereLight(0xcfe0ff, 0x1a2030, 1.4));
+const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+sun.position.set(-1, -2, 3);
+scene.add(sun);
+
+// MapBound box
+const boundBox = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0)),
+                                        new THREE.LineBasicMaterial({ color: 0x2a4a70 }));
+boundBox.position.copy(center);
+scene.add(boundBox);
+
+// Floor (when the floor voxel layer is hidden): dark plane + 1 m grid at the top of that layer.
+if (D.floor_z !== null) {
+  const plane = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, y1 - y0),
+                               new THREE.MeshBasicMaterial({ color: 0x0a1424 }));
+  plane.position.set(center.x, center.y, D.floor_z - 0.002);
+  scene.add(plane);
+  const n = Math.ceil(Math.max(x1 - x0, y1 - y0));
+  const grid = new THREE.GridHelper(n, n, 0x1d3a5c, 0x13253d);
+  grid.rotation.x = Math.PI / 2;  // GridHelper lies in x-z; turn it into x-y
+  grid.position.set(center.x, center.y, D.floor_z);
+  scene.add(grid);
+}
+const axes = new THREE.AxesHelper(1.0);  // 1 m map axes at StartPos (x red, y green, z blue)
+axes.position.set(...D.start);
+scene.add(axes);
+
+// ---------------------------------------------------------------- obstacles
+const w = D.voxel, nv = D.voxels.length / 3;
+const voxMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 });
+const voxels = new THREE.InstancedMesh(new THREE.BoxGeometry(w * 0.98, w * 0.98, w * 0.98), voxMat, nv);
+{
+  const m = new THREE.Matrix4(), c = new THREE.Color();
+  for (let i = 0; i < nv; i++) {
+    const z = z0 + (D.voxels[3 * i + 2] + 0.5) * w;
+    m.makeTranslation(x0 + (D.voxels[3 * i] + 0.5) * w, y0 + (D.voxels[3 * i + 1] + 0.5) * w, z);
+    voxels.setMatrixAt(i, m);
+    const f = (z - z0) / (z1 - z0);  // slightly lighter with height
+    voxels.setColorAt(i, c.setRGB(0.20 + 0.22 * f, 0.24 + 0.22 * f, 0.30 + 0.22 * f));
+  }
+}
+scene.add(voxels);
+
+// Enclosure layers (nets, roof): faint, see-through, never hide what is inside.
+const nc = D.cage.length / 3;
+const cage = new THREE.InstancedMesh(new THREE.BoxGeometry(w, w, w),
+  new THREE.MeshBasicMaterial({ color: 0x4f7fb0, transparent: true, opacity: 0.05, depthWrite: false }), nc);
+{
+  const m = new THREE.Matrix4();
+  for (let i = 0; i < nc; i++) {
+    m.makeTranslation(x0 + (D.cage[3 * i] + 0.5) * w, y0 + (D.cage[3 * i + 1] + 0.5) * w, z0 + (D.cage[3 * i + 2] + 0.5) * w);
+    cage.setMatrixAt(i, m);
+  }
+}
+scene.add(cage);
+
+// ---------------------------------------------------------------- path, route, checkpoints
+const N = D.t.length, T = D.t[N - 1];
+const vmax = Math.max(...D.speed, 1e-6);
+$("vmax").textContent = vmax.toFixed(2) + " m/s";
+const VIRIDIS = [[68, 1, 84], [59, 82, 139], [33, 145, 140], [94, 201, 98], [253, 231, 37]];
+function viridis(f) {
+  const x = Math.min(Math.max(f, 0), 1) * 4, i = Math.min(Math.floor(x), 3), u = x - i;
+  return VIRIDIS[i].map((a, k) => (a + u * (VIRIDIS[i + 1][k] - a)) / 255);
+}
+const trajGeo = new THREE.BufferGeometry();
+trajGeo.setAttribute("position", new THREE.Float32BufferAttribute(D.p, 3));
+trajGeo.setAttribute("color", new THREE.Float32BufferAttribute(D.speed.flatMap(s => viridis(s / vmax)), 3));
+const traj = new THREE.Line(trajGeo, new THREE.LineBasicMaterial({ vertexColors: true }));
+scene.add(traj);
+
+const routeGroup = new THREE.Group();
+{
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(D.route, 3));
+  const mat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.45 });
+  routeGroup.add(new THREE.Line(geo, mat), new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xffffff, size: 4, sizeAttenuation: false })));
+}
+scene.add(routeGroup);
+
+const markers = new THREE.Group();
+for (const [cx, cy, cz, hx, hy, hz] of D.cps) {
+  const box = new THREE.BoxGeometry(2 * hx, 2 * hy, 2 * hz);
+  const fill = new THREE.Mesh(box, new THREE.MeshBasicMaterial({ color: 0xff4040, transparent: true, opacity: 0.12, depthWrite: false }));
+  const edges = new THREE.LineSegments(new THREE.EdgesGeometry(box), new THREE.LineBasicMaterial({ color: 0xff5050 }));
+  fill.position.set(cx, cy, cz);
+  edges.position.set(cx, cy, cz);
+  markers.add(fill, edges);
+}
+const markR = Math.max(0.06, size / 250);
+for (const [pos, color] of [[D.start, 0x30d060], [D.p.slice(0, 3), 0x30d060], [D.goal, 0xff4040]]) {
+  const s = new THREE.Mesh(new THREE.SphereGeometry(markR, 16, 12), new THREE.MeshBasicMaterial({ color }));
+  s.position.set(...pos);
+  markers.add(s);
+}
+scene.add(markers);
+
+// ---------------------------------------------------------------- drone model (body frame: x forward, z = thrust)
+const L = D.arm, rr = D.rotor, th = Math.max(L * 0.1, 0.008);
+const d45 = L / Math.SQRT2;
+function local(x, y, z, yaw = 0) {
+  return new THREE.Matrix4().makeRotationZ(yaw).setPosition(x, y, z);
+}
+// [geometry, local matrix, kind]; kind picks the material
+const PARTS = [
+  [new THREE.BoxGeometry(2 * L, th, th), local(0, 0, 0, Math.PI / 4), "frame"],
+  [new THREE.BoxGeometry(2 * L, th, th), local(0, 0, 0, -Math.PI / 4), "frame"],
+  [new THREE.BoxGeometry(L * 0.7, L * 0.4, L * 0.22), local(0, 0, 0), "frame"],
+  [new THREE.BoxGeometry(L * 0.3, L * 0.16, L * 0.16), local(L * 0.45, 0, 0), "nose"],
+];
+for (const [sx, sy] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+  PARTS.push([new THREE.RingGeometry(rr * 0.82, rr, 28), local(sx * d45, sy * d45, th), "ring"]);
+  PARTS.push([new THREE.CircleGeometry(rr * 0.82, 28), local(sx * d45, sy * d45, th), "disc"]);
+}
+const holo = (color, opacity) => new THREE.MeshBasicMaterial({ color, transparent: true, opacity, side: THREE.DoubleSide,
+                                                               blending: THREE.AdditiveBlending, depthWrite: false });
+const GHOST_MAT = { frame: holo(0x2f9dff, 0.28), nose: holo(0x9fe0ff, 0.35), ring: holo(0x48b8ff, 0.4), disc: holo(0x1a5fb0, 0.08) };
+const SOLID_MAT = { frame: new THREE.MeshBasicMaterial({ color: 0x7fd0ff }), nose: new THREE.MeshBasicMaterial({ color: 0xffffff }),
+                    ring: new THREE.MeshBasicMaterial({ color: 0xa8e4ff, side: THREE.DoubleSide }),
+                    disc: holo(0x7fd0ff, 0.25) };
+
+function poseMatrix(i, out) {  // columns: body x, y, z in the map frame; translation: path position
+  const r = D.R, b = 9 * i, q = 3 * i;
+  return out.set(r[b], r[b + 3], r[b + 6], D.p[q],
+                 r[b + 1], r[b + 4], r[b + 7], D.p[q + 1],
+                 r[b + 2], r[b + 5], r[b + 8], D.p[q + 2],
+                 0, 0, 0, 1);
+}
+
+// arc length along the path rows
+const arc = new Float64Array(N);
+for (let i = 1; i < N; i++) {
+  const dx = D.p[3 * i] - D.p[3 * i - 3], dy = D.p[3 * i + 1] - D.p[3 * i - 2], dz = D.p[3 * i + 2] - D.p[3 * i - 1];
+  arc[i] = arc[i - 1] + Math.hypot(dx, dy, dz);
+}
+
+// ---------------------------------------------------------------- ghosts: one InstancedMesh per part
+const ghosts = new THREE.Group();
+scene.add(ghosts);
+function buildGhosts(spacing) {
+  for (const m of [...ghosts.children]) { ghosts.remove(m); m.dispose(); }
+  const idx = [];
+  let next = 0;
+  for (let i = 0; i < N; i++) {
+    if (arc[i] >= next - 1e-9) { idx.push(i); while (next <= arc[i] + 1e-9) next += spacing; }
+  }
+  if (idx[idx.length - 1] !== N - 1) idx.push(N - 1);
+  const pose = new THREE.Matrix4(), m = new THREE.Matrix4();
+  for (const [geo, loc, kind] of PARTS) {
+    const mesh = new THREE.InstancedMesh(geo, GHOST_MAT[kind], idx.length);
+    idx.forEach((i, k) => mesh.setMatrixAt(k, m.multiplyMatrices(poseMatrix(i, pose), loc)));
+    mesh.frustumCulled = false;
+    ghosts.add(mesh);
+  }
+  return idx.length;
+}
+
+// the playback drone
+const drone = new THREE.Group();
+drone.matrixAutoUpdate = false;
+for (const [geo, loc, kind] of PARTS) {
+  const mesh = new THREE.Mesh(geo, SOLID_MAT[kind]);
+  mesh.matrixAutoUpdate = false;
+  mesh.matrix.copy(loc);
+  drone.add(mesh);
+}
+scene.add(drone);
+
+// ---------------------------------------------------------------- UI
+const spacing = $("spacing"), timeSlider = $("time");
+spacing.value = D.spacing;
+timeSlider.max = T;
+function updateGhosts() {
+  const n = buildGhosts(parseFloat(spacing.value));
+  $("spVal").textContent = parseFloat(spacing.value).toFixed(2) + " (" + n + ")";
+}
+spacing.addEventListener("input", updateGhosts);
+updateGhosts();
+
+const bind = (id, fn) => { $(id).addEventListener("change", fn); fn(); };
+bind("cbVox", () => { voxels.visible = $("cbVox").checked; });
+bind("cbXray", () => {
+  const x = $("cbXray").checked;
+  voxMat.transparent = x; voxMat.opacity = x ? 0.18 : 1; voxMat.depthWrite = !x; voxMat.needsUpdate = true;
+});
+bind("cbCage", () => { cage.visible = $("cbCage").checked; });
+bind("cbGhost",() => { ghosts.visible = $("cbGhost").checked; });
+bind("cbTraj", () => { traj.visible = $("cbTraj").checked; });
+bind("cbRoute", () => { routeGroup.visible = $("cbRoute").checked; });
+bind("cbCp", () => { markers.visible = $("cbCp").checked; });
+
+let tNow = 0, playing = false;
+function rowAt(t) {  // last row with D.t[i] <= t
+  let lo = 0, hi = N - 1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (D.t[mid] <= t) lo = mid; else hi = mid - 1; }
+  return lo;
+}
+const tmp = new THREE.Matrix4();
+function setTime(t) {
+  tNow = Math.min(Math.max(t, 0), T);
+  const i = rowAt(tNow), j = Math.min(i + 1, N - 1);
+  const u = j > i ? (tNow - D.t[i]) / (D.t[j] - D.t[i]) : 0;
+  poseMatrix(u < 0.5 ? i : j, tmp);  // attitude from the nearer row, position interpolated
+  const p = [0, 1, 2].map(k => D.p[3 * i + k] + u * (D.p[3 * j + k] - D.p[3 * i + k]));
+  tmp.setPosition(...p);
+  drone.matrix.copy(tmp);
+  drone.matrixWorldNeedsUpdate = true;
+  timeSlider.value = tNow;
+  const v = D.speed[i] + u * (D.speed[j] - D.speed[i]);
+  $("readout").textContent = `t ${tNow.toFixed(2)} / ${T.toFixed(2)} s   |v| ${v.toFixed(2)} m/s   ` +
+                             `(${p.map(a => a.toFixed(2)).join(", ")}) m`;
+}
+timeSlider.addEventListener("input", () => setTime(parseFloat(timeSlider.value)));
+function togglePlay() {
+  if (!playing && tNow >= T) setTime(0);
+  playing = !playing;
+  $("play").textContent = playing ? "Pause" : "Play";
+}
+$("play").addEventListener("click", togglePlay);
+window.addEventListener("keydown", e => { if (e.code === "Space") { e.preventDefault(); togglePlay(); } });
+setTime(0);
+
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+let last = performance.now();
+renderer.setAnimationLoop(now => {
+  const dt = (now - last) / 1000;
+  last = now;
+  if (playing) {
+    setTime(tNow + dt * parseFloat($("rate").value));
+    if (tNow >= T) togglePlay();
+  }
+  controls.update();
+  renderer.render(scene, camera);
+});
+window.viewerReady = true;
+</script>
+</body>
+</html>
