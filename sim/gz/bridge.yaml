@@ -1,0 +1,37 @@
+# ros_gz_bridge config: Gazebo -> ROS 2 Humble, with the topic names the organizers'
+# sim/skybeta_sim.launch.py expects (namespace "drone", vehicle_id 1).
+- ros_topic_name: /clock
+  gz_topic_name: /clock
+  ros_type_name: rosgraph_msgs/msg/Clock
+  gz_type_name: gz.msgs.Clock
+  direction: GZ_TO_ROS
+- ros_topic_name: /drone1/left/color/image_raw
+  gz_topic_name: /drone1/left/color/image_raw
+  ros_type_name: sensor_msgs/msg/Image
+  gz_type_name: gz.msgs.Image
+  direction: GZ_TO_ROS
+- ros_topic_name: /drone1/right/color/image_raw
+  gz_topic_name: /drone1/right/color/image_raw
+  ros_type_name: sensor_msgs/msg/Image
+  gz_type_name: gz.msgs.Image
+  direction: GZ_TO_ROS
+- ros_topic_name: /drone1/left/color/camera_info
+  gz_topic_name: /drone1/left/color/camera_info
+  ros_type_name: sensor_msgs/msg/CameraInfo
+  gz_type_name: gz.msgs.CameraInfo
+  direction: GZ_TO_ROS
+- ros_topic_name: /drone1/right/color/camera_info
+  gz_topic_name: /drone1/right/color/camera_info
+  ros_type_name: sensor_msgs/msg/CameraInfo
+  gz_type_name: gz.msgs.CameraInfo
+  direction: GZ_TO_ROS
+- ros_topic_name: /drone1/sensors/imu
+  gz_topic_name: /world/dronehacks_course/model/skybeta/link/base_link/sensor/imu_sensor/imu
+  ros_type_name: sensor_msgs/msg/Imu
+  gz_type_name: gz.msgs.IMU
+  direction: GZ_TO_ROS
+- ros_topic_name: /sim/ground_truth/odom
+  gz_topic_name: /sim/ground_truth/odom
+  ros_type_name: nav_msgs/msg/Odometry
+  gz_type_name: gz.msgs.Odometry
+  direction: GZ_TO_ROS

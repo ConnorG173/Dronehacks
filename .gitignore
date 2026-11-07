@@ -1,2 +1,6 @@
 planner/build/
 planner/out/
+
+# sim: generated course model and run artifacts
+sim/gz/models/dronehacks_course/
+__pycache__/

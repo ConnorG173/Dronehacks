@@ -1,0 +1,42 @@
+#!/bin/sh
+#
+# @name Gazebo skybeta (DroneHacks sim)
+#
+# @type Quadrotor
+#
+# x500 airframe + the drone's GPS-denied estimator setup, from the organizers'
+# skybeta/px4/params (03a height reference, 03b EV fusion, 08 no optical flow).
+# Installed into PX4-Autopilot by sim/gcp/setup_sim.sh.
+
+PX4_SIM_MODEL=${PX4_SIM_MODEL:=skybeta}
+
+. ${R}etc/init.d-posix/airframes/4001_gz_x500
+
+# Height: downward rangefinder, baro backup. No GPS. (03a)
+param set-default EKF2_HGT_REF 2
+param set-default EKF2_BARO_CTRL 1
+param set-default EKF2_RNG_CTRL 1
+param set-default EKF2_RNG_A_HMAX 3.0
+param set-default EKF2_GPS_CTRL 0
+
+# Horizontal position + yaw from cuVSLAM external vision. (03b)
+param set-default EKF2_EV_CTRL 9
+param set-default EKF2_EV_DELAY 50
+param set-default EKF2_EV_NOISE_MD 0
+param set-default EKF2_EVP_NOISE 0.1
+param set-default EKF2_EVV_NOISE 0.1
+param set-default EKF2_EVA_NOISE 0.05
+
+# No optical flow. (08)
+param set-default EKF2_OF_CTRL 0
+
+# Lockstep sim: keep PX4 timestamps on sim time (see skybeta sim/px4_sitl.env).
+param set-default UXRCE_DDS_SYNCT 0
+
+# No RC transmitter in sim: sim/pilot.py plays the safety pilot over MAVLink
+# (arm, then switch to Position, exactly the drone's go signal).
+param set-default COM_RC_IN_MODE 4
+param set-default COM_RCL_EXCEPT 4
+param set-default NAV_RCL_ACT 0
+param set-default NAV_DLL_ACT 0
+param set-default COM_ARM_WO_GPS 1
