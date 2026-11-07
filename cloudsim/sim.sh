@@ -6,6 +6,8 @@
 #
 #   bash ~/Dronehacks/cloudsim/sim.sh start | stop | status | attach
 # "stop" kills the whole world, so the next "start" is a fresh world (our Reset world).
+# NAV_DLL_ACT=0: there is no ground station on this headless VM, and PX4's SITL default (2, RTL on
+# data-link loss) refuses to arm without one. Sim-only; check the drone's own value separately.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 WORLD=${WORLD:-default}
@@ -15,7 +17,7 @@ case "${1:-}" in
 start)
     if tmux has-session -t sim 2>/dev/null; then echo "already running (sim.sh stop first)"; exit 1; fi
     tmux new-session -d -s sim -n px4 \
-        "cd ~/PX4-Autopilot && HEADLESS=1 PX4_GZ_WORLD=$WORLD make px4_sitl $MODEL; bash"
+        "cd ~/PX4-Autopilot && HEADLESS=1 PX4_GZ_WORLD=$WORLD PX4_PARAM_NAV_DLL_ACT=0 make px4_sitl $MODEL; bash"
     tmux new-window -t sim -n agent "MicroXRCEAgent udp4 -p 8888; bash"
     tmux new-window -t sim -n clock \
         "source $HERE/env.sh && ros2 run ros_gz_bridge parameter_bridge /clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock; bash"
