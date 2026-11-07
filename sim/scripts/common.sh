@@ -9,6 +9,7 @@ PX4_BUILD="$PX4_DIR/build/px4_sitl_default"
 SKYBETA_DIR="${SKYBETA_DIR:-$HOME/skybeta}"
 WORLD="${WORLD:-dronehacks_course}"
 # Spawn pose x,y,z,roll,pitch,yaw in the map frame: the launch mark (planner StartPos), facing +x.
+CAMERA_X=0.12; CAMERA_Z=0.242   # stereo rig in base_link (sim/gz/models/skybeta/model.sdf oak_link)
 POSE="${POSE:--2.5146,0.9144,0.0,0,0,0}"   # z=0: rest on the floor; a drop at spawn corrupts EKF2 tilt alignment
 
 export ROS_DOMAIN_ID="$((10 + SIM_ID))"
