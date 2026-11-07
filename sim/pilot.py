@@ -10,17 +10,22 @@ treats that as the go signal and enters Offboard once. This does the same in sim
     python3 sim/pilot.py --sim 0 status    # mode, armed
 --sim N talks to PX4 instance N on its own GCS port (18570 + N), so two sims never cross.
 """
+import socket
 import sys
 import time
 
 from pymavlink import mavutil
 
-PX4_MAIN_MODE = {"position": 3, "land": None}
+PX4_MAIN_MODE = {"altitude": 2, "position": 3}
 
 
 def connect(sim_id, timeout=30):
     url = f"udpout:127.0.0.1:{18570 + sim_id}"
     m = mavutil.mavlink_connection(url, source_system=255)
+    # PX4 locks its GCS link onto the first partner address it hears from, so always use the same local
+    # port per slot; a fresh ephemeral port per run would never get replies after the first run.
+    m.port.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    m.port.bind(("127.0.0.1", 24550 + sim_id))
     t0 = time.time()
     hb = None
     while hb is None and time.time() - t0 < timeout:
@@ -81,6 +86,10 @@ def main():
     elif what == "go":
         if not wait_position_valid(m):
             sys.exit("EKF never reported a valid position: is cuVSLAM tracking and the bridge running?")
+        # The flight interface's go signal is a *switch into* Position after arming. PX4 sits in Position by
+        # default, so first select Altitude (main mode 2) like a pilot with the switch down, arm there, then flip.
+        set_px4_mode(m, PX4_MAIN_MODE["altitude"])
+        time.sleep(1.0)
         # Preflight checks flap for a few seconds after start (accel bias, position stability), so retry
         # like a pilot would: every 2 s for up to 90 s.
         t0 = time.time()
