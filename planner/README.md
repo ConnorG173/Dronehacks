@@ -3,9 +3,11 @@
 A standalone program that reads a course map, a start pose, an ordered list of
 checkpoints and a goal, computes the fastest dynamically feasible trajectory
 through all checkpoints with [GCOPTER](https://github.com/ZJU-FAST-Lab/GCOPTER),
-validates it, and writes a time-sampled path file in PX4 local NED. The flight
-code runs it once at startup and streams the file to PX4 as
-`TrajectorySetpoint` (position, velocity, acceleration, yaw, yawspeed).
+validates it, and writes a time-sampled path file in PX4 local NED at the pad.
+The flight code (`../localizer`) loads a committed copy of that file and plays it
+on a lag-governed path clock: the simulator adapter sends `TrajectorySetpoint`
+(position, velocity, acceleration, yaw, yawspeed), the real-drone adapter a
+position-only lead point to `/skybeta/setpoint/pose`.
 
 It does not use ROS and never talks to PX4. It is not flight code.
 
@@ -14,9 +16,13 @@ planner/
   CMakeLists.txt         Release, -O3 (upstream flags); Eigen3 + OMPL only
   src/main.cpp           the program
   third_party/gcopter/   13 upstream headers (2 documented fixes in geo_utils.hpp); LICENSE; UPSTREAM.md
-  config/course.yaml     inputs (currently the synthetic wall demo)
+  config/course_v3.yaml  the real course (dronehacks-course-v3.step); its path is
+                         ../localizer/data/course_v3_path.bin
+  config/course.yaml     synthetic wall demo (the example used below)
+  maps/course_v3.bin     course map (tools/cad_to_map.py, command in course_v3.yaml)
   maps/wall_demo.bin     demo map (tools/make_wall_map.py)
-  tools/                 laptop-side map tools (Python)
+  tools/cad_to_map.py    CAD -> map file (laptop; numpy + trimesh, STEP needs CadQuery)
+  tools/make_wall_map.py synthetic wall course (also imported by tests/run_tests.py)
   tests/                 upstream parity harness + tests
 ```
 
@@ -39,6 +45,22 @@ cd planner
 cmake -S . -B build            # add -DCMAKE_PREFIX_PATH=/opt/ros/jazzy if OMPL came from ros-jazzy-ompl
 cmake --build build -j
 ```
+
+Windows laptop (for iteration only; it does not count as a target build): MSYS2 UCRT64 g++ +
+Ninja, with eigen3 and boost from pacman and OMPL 1.7.0 built from source into
+`C:\Users\Conno\projects\ompl-1.7.0`. In Git Bash:
+
+```bash
+export PATH=/c/msys64/ucrt64/bin:/c/Users/Conno/projects/ompl-1.7.0/lib:$PATH
+cmake -S . -B build -G Ninja -DCMAKE_PREFIX_PATH="C:/Users/Conno/projects/ompl-1.7.0;C:/msys64/ucrt64"
+cmake --build build -j
+./build/gcopter_planner.exe config/course_v3.yaml     # -> out/course_v3/path.bin
+```
+
+To fly a new plan, copy `out/course_v3/path.bin` over `../localizer/data/course_v3_path.bin`.
+The plan is not reproducible: the RRT stops on a wall-clock limit, so every run gives a slightly
+different path, and some runs fail validation (re-run them). The committed path is the one the
+localizer tests pin (peak speed 2.42 m/s).
 
 ## Run
 
@@ -89,7 +111,7 @@ upstream names have upstream `global_planning.yaml` defaults.
 | `WeightT`, `ChiVec`, `SmoothingEps`, `IntegralIntervs`, `RelCostTol` | optimizer settings (upstream) |
 | `VehicleMass`, `GravAcc`, `HorizDrag`, `VertDrag`, `ParasDrag`, `SpeedEps` | `physicalParams`. **TODO(vehicle): placeholders (upstream's demo quad), not our drone** |
 | `OutDir` | output directory (overridden by `--out`) |
-| `SampleDt` | path-file row spacing (s), default 0.01 |
+| `SampleDt` | path-file row spacing (s); 0.01 in both configs |
 | `YawMinSpeed`, `YawRateMaxDeg`, `YawSmoothTime` | yaw generation, see Frames |
 
 Real vehicle values still to measure: mass, thrust range, drag terms, and
@@ -216,8 +238,9 @@ rows = np.frombuffer(raw, "<f8", offset=32).reshape(-1, 12)
 the RRT route in map coordinates (debugging and the parity test).
 
 The first row is at rest at `(0, 0, -HoverHeight)` with yaw 0: the flight code
-should take off, settle at that point, then stream rows by elapsed time and hold
-the last row (at rest at the goal) afterwards.
+takes off, settles at that point, then follows the rows (`localizer/core/clock.py`
+slows the playback when the vehicle lags) and holds the last row (at rest at the
+goal) afterwards.
 
 ## Frames
 
@@ -247,11 +270,11 @@ map +y).
 | velocity (0, 4, 0) | (4, 0, 0) | 4 m/s forward |
 | heading 0 deg (facing map +x) | yaw +90 deg | facing right |
 
-This assumes PX4's local `+x` is the vehicle's forward direction at startup
-(as with an external-vision frame initialised at the pad). If PX4's local frame
-is north-aligned instead (magnetometer/GPS), set `StartHeadingDeg` to the map
-direction of north and expect a non-zero initial yaw error; check this in the
-flight code before streaming.
+`StartHeadingDeg` is the vehicle's physical heading on the pad, in the map
+frame; the follower's `pad_heading_deg` parameter must equal it. Do not set it to
+north for a north-aligned PX4 frame: the follower measures its own transform from
+the vehicle's local frame to the pad frame on the pad (`localizer/core/frames.py`
+`pad_init`), which absorbs any rotation or offset of PX4's local frame.
 
 **Yaw** (GCOPTER plans none): heading = direction of horizontal velocity;
 below `YawMinSpeed` the last heading is held (the start heading until the

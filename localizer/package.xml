@@ -2,8 +2,9 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypenamespace="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>localizer</name>
-  <version>0.1.0</version>
-  <description>Course-frame localization (CAD scan matcher) and path streaming for skybeta.</description>
+  <version>0.2.0</version>
+  <description>Path follower for the planner's path.bin: a ROS-free core (localizer.core), a simulator
+    adapter (px4_msgs, /fmu/in) and a real-drone adapter (skybeta, /skybeta/setpoint/pose only).</description>
   <maintainer email="connorg1@stanford.edu">ConnorG173</maintainer>
   <license>Proprietary</license>
 
@@ -11,10 +12,12 @@
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>nav_msgs</exec_depend>
-  <exec_depend>sensor_msgs</exec_depend>
-  <exec_depend>message_filters</exec_depend>
-  <exec_depend>tf2_ros</exec_depend>
   <exec_depend>px4_msgs</exec_depend>
+  <exec_depend>rcl_interfaces</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <!-- real adapter only (skybeta Jetson): fmu_topic() and the flight_interface launch include -->
   <exec_depend>skybeta_flight_interface</exec_depend>
   <exec_depend>competitor_example</exec_depend>
   <exec_depend>python3-numpy</exec_depend>

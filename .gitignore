@@ -1,2 +1,10 @@
 planner/build/
 planner/out/
+
+# Python / colcon artefacts
+__pycache__/
+*.pyc
+.pytest_cache/
+localizer/build/
+localizer/install/
+localizer/log/
