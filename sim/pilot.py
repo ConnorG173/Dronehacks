@@ -4,10 +4,11 @@
 On the drone the pilot arms, then switches to Position; the organizers' flight interface
 treats that as the go signal and enters Offboard once. This does the same in sim.
 
-    python3 sim/pilot.py go        # wait for a position estimate, arm, switch to Position
-    python3 sim/pilot.py land      # PX4 Land mode (the pilot's abort)
-    python3 sim/pilot.py kill      # disarm immediately (the kill switch; only on the ground!)
-    python3 sim/pilot.py status    # mode, armed, estimator position validity
+    python3 sim/pilot.py --sim 0 go        # wait for a position estimate, arm, switch to Position
+    python3 sim/pilot.py --sim 0 land      # PX4 Land mode (the pilot's abort)
+    python3 sim/pilot.py --sim 0 kill      # disarm immediately (the kill switch; only on the ground!)
+    python3 sim/pilot.py --sim 0 status    # mode, armed
+--sim N talks to PX4 instance N on its own GCS port (18570 + N), so two sims never cross.
 """
 import sys
 import time
@@ -17,9 +18,16 @@ from pymavlink import mavutil
 PX4_MAIN_MODE = {"position": 3, "land": None}
 
 
-def connect(url="udpin:0.0.0.0:14550", timeout=30):
+def connect(sim_id, timeout=30):
+    url = f"udpout:127.0.0.1:{18570 + sim_id}"
     m = mavutil.mavlink_connection(url, source_system=255)
-    if not m.wait_heartbeat(timeout=timeout):
+    t0 = time.time()
+    hb = None
+    while hb is None and time.time() - t0 < timeout:
+        # udpout: PX4 only replies once it has heard from us
+        m.mav.heartbeat_send(mavutil.mavlink.MAV_TYPE_GCS, mavutil.mavlink.MAV_AUTOPILOT_INVALID, 0, 0, 0)
+        hb = m.wait_heartbeat(timeout=1)
+    if hb is None:
         sys.exit("no heartbeat from PX4 on " + url)
     return m
 
@@ -60,10 +68,14 @@ def status(m):
 
 
 def main():
-    if len(sys.argv) != 2 or sys.argv[1] not in ("go", "land", "kill", "status"):
+    args = sys.argv[1:]
+    sim_id = 0
+    if len(args) >= 2 and args[0] == "--sim":
+        sim_id, args = int(args[1]), args[2:]
+    if len(args) != 1 or args[0] not in ("go", "land", "kill", "status"):
         sys.exit(__doc__)
-    m = connect()
-    what = sys.argv[1]
+    m = connect(sim_id)
+    what = args[0]
     if what == "status":
         status(m)
     elif what == "go":

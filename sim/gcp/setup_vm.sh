@@ -19,6 +19,12 @@ wait_apt
 sudo apt-get update -q
 sudo apt-get install -yq curl git build-essential tmux htop software-properties-common gnupg lsb-release
 
+step "NVIDIA OpenGL/EGL userspace (the GCP accelerator image ships compute-only; Gazebo headless rendering needs EGL)"
+DRV_VER="$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | cut -d. -f1)"
+dpkg -s "libnvidia-gl-${DRV_VER}-server" >/dev/null 2>&1 || { wait_apt; sudo apt-get install -yq "libnvidia-gl-${DRV_VER}-server"; }
+sudo usermod -aG video,render "$USER"
+ls /usr/share/glvnd/egl_vendor.d/
+
 step "docker + nvidia container toolkit"
 if ! command -v docker >/dev/null; then
   curl -fsSL https://get.docker.com | sudo sh
@@ -70,7 +76,14 @@ cd "$HOME/skybeta"
 git pull -q --ff-only || true
 VERSION="$(cat VERSION)"
 if ! sudo docker image inspect "skybeta-sim:${VERSION}" >/dev/null 2>&1; then
-  sudo docker build -f docker/Dockerfile.sim -t "skybeta-sim:${VERSION}" .
+  # Organizer bug (their sim profile is marked "never executed"): the loop that COLCON_IGNOREs every
+  # top-level dir without a package.xml also hits px4-ros2-interface-lib (its package.xml is in
+  # px4_ros2_cpp/), so competitor_advanced_cpp cannot find px4_ros2_cpp. Build a patched copy; their
+  # repo stays untouched.
+  sed 's#if \[ ! -f "${d}package.xml" \]; then#if [ ! -f "${d}package.xml" ] \&\& [ "${d}" != "px4-ros2-interface-lib/" ]; then#' \
+    docker/Dockerfile.sim > /tmp/Dockerfile.sim.team
+  grep -q 'px4-ros2-interface-lib/" ]' /tmp/Dockerfile.sim.team || { echo "patch did not apply"; exit 1; }
+  sudo docker build -f /tmp/Dockerfile.sim.team -t "skybeta-sim:${VERSION}" .
 fi
 sudo docker image ls | grep skybeta-sim
 

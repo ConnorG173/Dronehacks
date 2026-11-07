@@ -65,6 +65,6 @@ Keep a results table in `docs/results/localization.md`.
 > known course map, publishing `/team/odom_map`, TF `map → odom` and `/team/loc/status` exactly as the
 > contracts say. Ship milestone 1 (the republisher) first so path following is unblocked. Use the proven
 > open-source libraries in the doc rather than writing estimators from scratch, and measure every method
-> against Gazebo ground truth on the GCP sim, recording results in `docs/results/localization.md`.
+> against Gazebo ground truth on the GCP sim (your slot is 1), recording results in `docs/results/localization.md`.
 > Nothing may use data recorded on the real course in a later run. Do not modify `~/skybeta`. Work on
 > branch `localization` off `sim-and-plans`, commit small, and open a PR when a milestone works in sim.

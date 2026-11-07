@@ -83,4 +83,4 @@ Two simulators exist; use both for different things.
   Jazzy, its own companion code (`refnav/`, `onboard/`) that talks to `/fmu/in/*` directly, one
   teammate in control at a time. Good for visual realism; it does not run the drone's flight interface.
 
-Every change is tested in sim before net time.
+Every change is tested in sim before net time. Path following uses sim slot 0, localization slot 1.

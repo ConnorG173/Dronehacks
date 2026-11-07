@@ -122,7 +122,7 @@ MODEL_SDF = """<?xml version="1.0"?>
         <geometry><mesh><uri>model://dronehacks_course/meshes/course.obj</uri></mesh></geometry>
       </visual>
       <collision name="collision">
-        <geometry><mesh><uri>model://dronehacks_course/meshes/course.obj</uri></mesh></geometry>
+        <geometry><mesh><uri>model://dronehacks_course/meshes/collision.stl</uri></mesh></geometry>
       </collision>
     </link>
   </model>
@@ -163,6 +163,14 @@ def main():
     meshes_by_mat["floor"] = [floor_slab(((-a.floor_half, -a.floor_half), (a.floor_half, a.floor_half)), floor_z - 0.001)]
 
     mesh_dir = write_obj(meshes_by_mat, a.out, a.tile)
+    # Collision: one clean mesh (shared vertices, no degenerate/duplicate faces). ODE's trimesh asserts
+    # on the per-face-vertex visual OBJ.
+    col = trimesh.util.concatenate([m for ms in meshes_by_mat.values() for m in ms])
+    col.merge_vertices()
+    col.update_faces(col.nondegenerate_faces(height=1e-6))
+    col.update_faces(col.unique_faces())
+    col.remove_unreferenced_vertices()
+    col.export(os.path.join(mesh_dir, "collision.stl"))
     for k, name in enumerate(meshes_by_mat):
         make_texture(a.seed * 100 + k).save(os.path.join(mesh_dir, f"{name}.png"))
     with open(os.path.join(a.out, "model.sdf"), "w") as f:

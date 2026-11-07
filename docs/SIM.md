@@ -14,47 +14,70 @@ your nodes ─▶ /skybeta/setpoint/twist|pose ─▶ flight interface ─▶ PX
 sim/pilot.py = the safety pilot (arm, then Position = go signal)
 ```
 
+## Two sims, one per workstream
+
+One VM runs two fully isolated sims. Nothing is shared except the GPU.
+
+| | Slot 0: path following | Slot 1: localization |
+|---|---|---|
+| Working copy on the VM | `~/slot0/Dronehacks` | `~/slot1/Dronehacks` |
+| `ROS_DOMAIN_ID` | 10 | 11 |
+| Gazebo partition | `sim0` | `sim1` |
+| PX4 instance / MAVLink port | 0 / 18570 | 1 / 18571 |
+| uXRCE-DDS port | 8888 | 8889 |
+| Stack container | `skybeta-sim-0` | `skybeta-sim-1` |
+| Foxglove | `ws://localhost:8765` | `ws://localhost:8766` |
+| tmux session | `sim0` | `sim1` |
+
+## Workflow from your laptop
+
+```bash
+bash sim/gcp/sync.sh 0                                  # copy your checkout to slot 0 (no .git, no builds)
+bash sim/gcp/vm.sh 0 'bash sim/run_sim.sh 0'            # start sim 0 (gz | px4 | bridge | stack | foxglove)
+bash sim/gcp/vm.sh 0 'bash sim/scripts/competitor.sh'   # flight interface + organizers' example (a square)
+bash sim/gcp/vm.sh 0 'python3 sim/pilot.py --sim 0 go'  # waits for EKF position, arms, Position = go
+bash sim/gcp/vm.sh 0 'python3 sim/pilot.py --sim 0 land'
+bash sim/gcp/vm.sh 0 'bash sim/run_sim.sh 0 stop'
+```
+
+Your own launch: `bash sim/scripts/competitor.sh <package> <file.launch.py> [args]`. Build your packages inside the
+stack container (`bash sim/scripts/shell.sh` → you are in `/root/team`, your working copy → `colcon build`);
+`competitor.sh` sources `/root/team/install` automatically. Keep the flight interface in your launch exactly as
+`competitor.launch.py` has it.
+
+Inspect: `bash sim/gcp/vm.sh 0 'tmux capture-pane -p -t sim0:px4 | tail -30'`, or a ROS shell in the slot's domain with
+`bash sim/scripts/shell.sh` (in the container) or `bash sim/scripts/shell.sh --host`.
+
+Watch it: Foxglove Studio → `ws://localhost:8765` (slot 1: 8766) through a tunnel:
+`gcloud compute ssh dronehacks-sim --project dronehacks-sim-jh --zone <zone> -- -L 8765:localhost:8765`.
+
 ## The VM
 
 | | |
 |---|---|
-| Name | `dronehacks-sim`, project `cs231n-496319`, zone `us-west1-c` |
+| Name | `dronehacks-sim`, project `dronehacks-sim-jh` (account jhollister2025@gmail.com, Debit billing); zone in `sim/gcp/vm.env` |
 | Machine | g2-standard-16: 16 vCPU, 64 GB, 1× NVIDIA L4, 300 GB disk |
 | Cost | about $1.20/hour while running. **Stop it when nobody is using it.** |
 
 ```bash
-gcloud compute instances start dronehacks-sim --project cs231n-496319 --zone us-west1-c
-gcloud compute ssh dronehacks-sim --project cs231n-496319 --zone us-west1-c
-gcloud compute instances stop dronehacks-sim --project cs231n-496319 --zone us-west1-c
+gcloud compute instances start dronehacks-sim --project dronehacks-sim-jh --zone <zone>
+gcloud compute instances stop  dronehacks-sim --project dronehacks-sim-jh --zone <zone>
 ```
 
-Teammates need IAM access to the project (Compute OS Admin Login or Instance Admin) to ssh in;
-ask Justin. Everyone shares the `~/Dronehacks` checkout; use your own branch and `git pull`.
+Teammates need IAM access to the project to ssh in; ask Justin.
 
-## Run it
+## Setup (done once; rerun is safe)
 
 ```bash
-cd ~/Dronehacks
-bash sim/run_sim.sh                      # gz | px4 | bridge | stack | foxglove in tmux "sim"
-tmux attach -t sim                       # watch (Ctrl-b n/p switch window, Ctrl-b d detach)
-bash sim/scripts/competitor.sh           # flight interface + organizers' example (a square)
-python3 sim/pilot.py go                  # waits for EKF position, arms, switches to Position
-python3 sim/pilot.py land                # abort
-bash sim/run_sim.sh stop
+bash sim/gcp/setup_vm.sh     # NVIDIA EGL, Docker+NVIDIA, ROS 2 Humble, PX4 v1.16.2 + Gazebo Harmonic, ros_gz, skybeta-sim image
+bash sim/gcp/setup_sim.sh    # course model from the STEP, skybeta airframe + rcS patch into PX4, rebuild
 ```
 
-Your own launch instead of the example: `bash sim/scripts/competitor.sh <package> <file.launch.py> [args]`.
-Keep the flight interface in your launch exactly as `competitor.launch.py` has it.
-
-**Watch it:** Foxglove Studio → open connection → `ws://localhost:8765` through an ssh tunnel:
-`gcloud compute ssh dronehacks-sim ... -- -L 8765:localhost:8765`.
-
-## Setup (already done once; rerun is safe)
-
-```bash
-bash sim/gcp/setup_vm.sh     # Docker+NVIDIA, ROS 2 Humble, PX4 v1.16.2 + Gazebo Harmonic, ros_gz, skybeta-sim image
-bash sim/gcp/setup_sim.sh    # course model from the STEP, skybeta airframe into PX4, rebuild
-```
+Fixes these scripts apply, in case you rebuild by hand:
+- The GCP accelerator image is compute-only: install `libnvidia-gl-<ver>-server` or Gazebo cannot render headless.
+- The organizers' `Dockerfile.sim` COLCON_IGNOREs `px4-ros2-interface-lib` by mistake; we build a patched copy.
+- PX4 namespaces uXRCE topics for instance > 0 (`/px4_1/fmu/...`); we patch `rcS` so `PX4_NO_UXRCE_NS=1` keeps `/fmu/...`.
+- The visual course mesh has per-face vertices for UVs; ODE needs the separate cleaned `collision.stl`.
 
 ## What's in `sim/`
 
@@ -65,6 +88,7 @@ bash sim/gcp/setup_sim.sh    # course model from the STEP, skybeta airframe into
 | `gz/worlds/dronehacks_course.sdf` | world frame = planner map frame; dim indoor lighting with shadows |
 | `px4/4099_gz_skybeta` | airframe: x500 + the drone's EKF2 setup (rangefinder height, EV pos+yaw, no GPS, no flow) |
 | `gz/bridge.yaml` | Gazebo → ROS topic names the organizers' sim launch expects |
+| `scripts/` | one script per process, all driven by `SIM_ID` (`common.sh`) |
 | `pilot.py` | safety-pilot stand-in over MAVLink |
 
 ## Known differences from the drone (keep in mind when reading results)

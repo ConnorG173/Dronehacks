@@ -81,7 +81,7 @@ Keep a results table in `docs/results/path_following.md`.
 > converts it to the `map`/`odom` frames, and tracks it by publishing velocity setpoints with feedforward to
 > `/skybeta/setpoint/twist` through the organizers' flight interface. Start with the baseline tracker, then
 > an acados MPC. Use the proven open-source libraries in the doc rather than writing solvers from scratch.
-> No course-specific numbers in code. Test every change in the Gazebo sim on the GCP VM on the course map and
+> No course-specific numbers in code. Test every change in the Gazebo sim on the GCP VM (your slot is 0) on the course map and
 > on random maps, and record metrics in `docs/results/path_following.md`. Do not modify `~/skybeta` or the
 > flight interface. Work on branch `path-following` off `sim-and-plans`, commit small, and open a PR when a
 > milestone works in sim.

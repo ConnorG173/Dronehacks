@@ -26,7 +26,7 @@
   gz_type_name: gz.msgs.CameraInfo
   direction: GZ_TO_ROS
 - ros_topic_name: /drone1/sensors/imu
-  gz_topic_name: /world/dronehacks_course/model/skybeta/link/base_link/sensor/imu_sensor/imu
+  gz_topic_name: /world/@WORLD@/model/@MODEL@/link/base_link/sensor/imu_sensor/imu
   ros_type_name: sensor_msgs/msg/Imu
   gz_type_name: gz.msgs.IMU
   direction: GZ_TO_ROS
