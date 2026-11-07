@@ -12,7 +12,7 @@
 #   bash cloudsim/vm.sh delete    delete the VM and its disk (rebuild with create + setup.sh)
 set -euo pipefail
 PROJECT=${PROJECT:-$(gcloud config get-value project 2>/dev/null)}
-ZONE=${ZONE:-us-central1-a}
+ZONE=${ZONE:-us-central1-b}
 REGION=${ZONE%-*}
 VM=${VM:-cloudsim}
 G=(gcloud --project "$PROJECT")
