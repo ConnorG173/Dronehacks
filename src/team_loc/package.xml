@@ -21,6 +21,7 @@
   <depend>tf2_eigen</depend>
   <depend>px4_msgs</depend>
   <depend>isaac_ros_visual_slam_interfaces</depend>
+  <exec_depend>team_loc_matcher</exec_depend>
 
   <test_depend>ament_cmake_gtest</test_depend>
 
