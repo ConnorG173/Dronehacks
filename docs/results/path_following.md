@@ -85,9 +85,9 @@ at speed are checked.
 
 ### Random courses (`tools/make_random_map.py`, seeds 1, 3–8; rotated layouts, random launch heading)
 
-Plans at MaxVelMag 1.2. Seeds 1, 3, 4, 8 crash the current planner (OMPL InformedRRTstar destructor
-segfault after a straight 2-state solution); their plans here come from a scratch copy with a
-straight-line pre-check (reported; `planner/` unchanged). Seed 2 generates an invalid course.
+Plans at MaxVelMag 1.2. Seeds 1, 3, 4, 8 crashed the planner before the DroneHacks `sfc_gen.hpp` fix (OMPL InformedRRTstar destructor
+segfault after a straight 2-state solution; `planner/third_party/gcopter/UPSTREAM.md` change 3, regression test
+`planner/tests/run_tests.py` section 5). Seed 2 generates an invalid course.
 
 | seed | mission s | course s | plan s | max xt | min clear | touches | checkpoints | cp miss | land err |
 |---|---|---|---|---|---|---|---|---|---|

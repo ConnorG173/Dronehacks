@@ -51,6 +51,28 @@ namespace sfc_gen
                            const double &timeout,
                            std::vector<Eigen::Vector3d> &p)
     {
+        // DroneHacks fix: if the straight segment s -> g is collision-free (sampled every half
+        // voxel), return it without running OMPL. With OMPL 1.7 (ros-humble-ompl, aarch64 and
+        // x86) InformedRRTstar segfaults in its destructor (RRTstar::freeMemory ->
+        // RealVectorStateSpace::freeState) after such a leg; see UPSTREAM.md "Local changes" 3.
+        {
+            const double step = 0.5 * mapPtr->getScale();
+            const int n = std::max(2, (int)std::ceil((g - s).norm() / step));
+            bool free = true;
+            for (int i = 0; i <= n && free; i++)
+            {
+                const Eigen::Vector3d q = s + (g - s) * ((double)i / n);
+                free = mapPtr->query(q) == 0;
+            }
+            if (free)
+            {
+                p.clear();
+                p.push_back(s);
+                p.push_back(g);
+                return (g - s).norm();
+            }
+        }
+
         auto space(std::make_shared<ompl::base::RealVectorStateSpace>(3));
 
         ompl::base::RealVectorBounds bounds(3);

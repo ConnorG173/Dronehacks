@@ -11,6 +11,9 @@
 2. Checkpoint tests on the synthetic wall course (tools/make_wall_map.py).
 3. Impossible checkpoint (inside the wall) fails and leaves no path file.
 4. path.bin header/rows agree with path.csv and the start/goal states.
+5. Regression for the DroneHacks sfc_gen.hpp fix: a random course that used to segfault in
+   OMPL's InformedRRTstar destructor now plans (skipped without numpy).
+6. config/course_v3.yaml still plans (up to 3 attempts; no attempt may crash).
 """
 import math
 import os
@@ -263,11 +266,49 @@ def checkpoints():
     check(all(rows[i + 1][0] > rows[i][0] for i in range(nrows - 1)), "time strictly increasing")
 
 
+def straight_legs():
+    """Random course seed 3 (path_following/tools/make_random_map.py) segfaulted every run before
+    the sfc_gen.hpp fix: OMPL's InformedRRTstar destructor after a 2-state (straight) solution."""
+    print("\n== 5. Random course, seed 3 (regression: OMPL destructor segfault) ==")
+    gen = os.path.join(os.path.dirname(ROOT), "path_following", "tools", "make_random_map.py")
+    d = os.path.join(WORK, "random_seed3")
+    code, log = run([sys.executable, gen, d, "--seed", "3",
+                     "--template", os.path.join(ROOT, "config", "course_v3.yaml")])
+    if code != 0:
+        print("  SKIP  random map generator unavailable (needs numpy):", log.strip().splitlines()[-1:])
+        return
+    codes = []
+    for _ in range(3):
+        code, log = run([PLANNER, os.path.join(d, "course.yaml"), "--out", os.path.join(d, "out")])
+        codes.append(code)
+        if code == 0:
+            print("\n".join("    " + l for l in log.splitlines() if "total" in l))
+            break
+    check(all(c >= 0 and c != 139 for c in codes), "random seed 3: no attempt crashed (exits %s)" % codes)
+    check(codes[-1] == 0, "random seed 3: plans within 3 attempts (exits %s)" % codes)
+
+def course_v3():
+    print("\n== 6. Real course config still plans ==")
+    cfg = os.path.join(ROOT, "config", "course_v3.yaml")
+    out = os.path.join(WORK, "course_v3")
+    codes = []
+    for _ in range(3):
+        code, log = run([PLANNER, cfg, "--out", out])
+        codes.append(code)
+        if code == 0:
+            print("\n".join("    " + l for l in log.splitlines() if "total" in l))
+            break
+    check(all(c >= 0 and c != 139 for c in codes), "course_v3: no attempt crashed (exits %s)" % codes)
+    check(codes[-1] == 0, "course_v3: plans within 3 attempts (exits %s)" % codes)
+
+
 if __name__ == "__main__":
     for exe in (PLANNER, UPSTREAM):
         if not os.path.exists(exe):
             sys.exit("missing %s; build first (see README)" % exe)
     parity()
     checkpoints()
+    straight_legs()
+    course_v3()
     print("\n%s: %d failure(s)" % ("FAILED" if failures else "ALL PASSED", len(failures)))
     sys.exit(1 if failures else 0)

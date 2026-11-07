@@ -11,9 +11,9 @@
 
 ## Local changes
 
-Two changes, both in `include/gcopter/geo_utils.hpp`; the other 12 headers are
-byte-identical to upstream. Reproduce the full diff with
-`git -C <upstream clone> show e0444f6:gcopter/include/gcopter/geo_utils.hpp | diff - include/gcopter/geo_utils.hpp`.
+Three changes: two in `include/gcopter/geo_utils.hpp`, one in `include/gcopter/sfc_gen.hpp`; the
+other 11 headers are byte-identical to upstream. Reproduce the full diff with
+`git -C <upstream clone> show e0444f6:gcopter/include/gcopter/<file> | diff - include/gcopter/<file>`.
 
 ### 1. Compiler fix: `filterLess::operator()` made `const` (line 90)
 
@@ -73,6 +73,56 @@ vertex was NaN/inf or at least 1.8 cm outside its polytope (tolerance about
 one or two checkpoints, optimizer failures went from about 1 in 4 runs to 0
 in 100 and the assertion crashes to 0.
 
+### 3. Crash fix: straight collision-free legs skip OMPL in `sfc_gen::planPath` (top of the function)
+
+```diff
+                            std::vector<Eigen::Vector3d> &p)
+     {
++        // DroneHacks fix: ... (comment)
++        {
++            const double step = 0.5 * mapPtr->getScale();
++            const int n = std::max(2, (int)std::ceil((g - s).norm() / step));
++            bool free = true;
++            for (int i = 0; i <= n && free; i++)
++            {
++                const Eigen::Vector3d q = s + (g - s) * ((double)i / n);
++                free = mapPtr->query(q) == 0;
++            }
++            if (free)
++            {
++                p.clear();
++                p.push_back(s);
++                p.push_back(g);
++                return (g - s).norm();
++            }
++        }
++
+         auto space(std::make_shared<ompl::base::RealVectorStateSpace>(3));
+```
+
+What goes wrong upstream (2026-11-07, OMPL 1.7.0 from `ros-humble-ompl`, the version in the drone's
+skybeta image; seen on aarch64): on some maps the planner dies with SIGSEGV (exit 139, no output),
+deterministically on every run. 4 of 8 random courses from `path_following/tools/make_random_map.py`
+(seeds 1, 3, 4, 8) crashed; `course_v3` never did. Backtrace (`-g -O1`, gdb):
+
+```
+#0 ompl::base::RealVectorStateSpace::freeState(ompl::base::State*) const   (libompl.so.18)
+#1 ompl::geometric::RRTstar::freeMemory()
+#2 ompl::geometric::RRTstar::~RRTstar()
+#3-6 std::shared_ptr<ompl::geometric::InformedRRTstar>::~shared_ptr()
+#7 sfc_gen::planPath<voxel_map::VoxelMap>(...) at sfc_gen.hpp:114, p = std::vector of length 2
+#8 main at src/main.cpp:331
+```
+
+The solution path has 2 states: the leg is a straight, collision-free segment, and InformedRRTstar's
+tree teardown then frees an invalid state. The fix returns such a segment directly (the same 2-point
+route OMPL found), so OMPL is only used for legs that need a search. The check uses the same
+`query() == 0` test (dilated map) as OMPL's validity checker, sampled every half voxel. Cost returned
+is the segment length, like the path-length objective. Results: all 4 crashing courses plan; course_v3
+plans as before (13.9–14.4 s, same as before the fix, RRT variance); upstream parity tests unchanged.
+Regression test: `tests/run_tests.py` section 5 (random course seed 3: exit -11 x3 before, plans after)
+and section 6 (course_v3 still plans).
+
 Not changed in the headers but needed by includers: `gcopter.hpp` uses
 `geo_utils` without including it and `quickhull.hpp` uses `std::uint8_t`
 without `<cstdint>` (upstream gets both via `misc/visualizer.hpp` and ROS), so
@@ -81,9 +131,10 @@ without `<cstdint>` (upstream gets both via `misc/visualizer.hpp` and ROS), so
 
 ## Checksums
 
-Verify with `sha256sum -c` from `include/gcopter/` (`geo_utils.hpp` is the
-patched file; upstream's original is
-`9a1e9b70c9a15ef46c2f8658df293f29051e98ab7dac5ffad129bfa8b9d87031`):
+Verify with `sha256sum -c` from `include/gcopter/` (`geo_utils.hpp` and `sfc_gen.hpp` are the
+patched files; upstream's originals are
+`9a1e9b70c9a15ef46c2f8658df293f29051e98ab7dac5ffad129bfa8b9d87031` and
+`ac69935d3ee2b4192e75a2d7efbcd31082f706c8517fb951e714b860b3e6a776`):
 
 ```
 e47441312b31dff209a59798a8414cbdf310534720e984c73894cb7ea1beb6ee  firi.hpp
@@ -95,7 +146,7 @@ fdc6b0d4c4b4c50e0368d6983dd28ffd893c824df461aebe9e3b24dd8a99b3ca  lbfgs.hpp
 c0d2668c2c87ff9dfddc750d2bca9f91e4846f8fa78beffe44def0736b5e0e21  quickhull.hpp
 c5eaa3ebed6bc65b5671db8965c0c6e3f79cb0cfa9787c89822315cdbac9d781  root_finder.hpp
 d7b7bd66597ca1355d7bf16d902cf17da638ad0fd98870673f209a329ded0abf  sdlp.hpp
-ac69935d3ee2b4192e75a2d7efbcd31082f706c8517fb951e714b860b3e6a776  sfc_gen.hpp
+b55198c3822b8cc2da9657535013a4df83ac4d39a417e7b03588dbed8238fd23  sfc_gen.hpp
 9ba9b8d43be34848f9f3bd955d5bf8c8922e85757255a7363c82fe59a8a2e9fd  trajectory.hpp
 80ec4e25859c5758b2f80f538267cfb1eb25ef121d394307b3802a97df63f3e7  voxel_dilater.hpp
 4209beca9876eb1e71e459490fbdfb5152793cd6b10626faedc1123c6fab7e1f  voxel_map.hpp
