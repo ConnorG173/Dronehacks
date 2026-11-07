@@ -1,0 +1,60 @@
+# gcopter_planner input. Flat "Key: value" lines; '#' starts a comment;
+# numbers separated by spaces or commas. Relative paths are relative to this
+# file. Unknown keys are an error. Keys named like upstream
+# gcopter/config/global_planning.yaml keep upstream's name and default value.
+#
+# This file plans the synthetic wall demo course (tools/make_wall_map.py).
+# Replace the map, start, checkpoints and goal with the real course.
+
+# ---- Map (map frame: metres, right-handed, z up) ----
+MapFile:          ../maps/wall_demo.bin
+MapBound:         [-1.0, 13.0, -6.0, 6.0, 0.0, 4.0]   # xmin xmax ymin ymax zmin zmax; outside = occupied
+VoxelWidth:       0.25                                # upstream
+DilateRadius:     0.5                                 # upstream; safety margin around obstacles
+
+# ---- Mission (map frame) ----
+StartPos:         [0.0, 0.0, 0.0]   # takeoff pad on the ground = PX4 local-frame origin
+StartHeadingDeg:  0.0               # vehicle heading at start, CCW from map +x; = PX4 local +x
+HoverHeight:      1.5               # trajectory starts hovering this far above StartPos, at rest
+# Checkpoint: cx cy cz hx hy hz = box center and half-extents (axis-aligned, map frame).
+# Repeat the key once per checkpoint, in flight order. Boxes must be free space.
+Checkpoint:       [9.0, -4.0, 1.5, 0.3, 0.3, 0.3]
+Goal:             [11.0, 0.0, 1.5]  # trajectory ends here at rest
+
+# ---- Front end and corridor (literals in upstream global_planning.cpp) ----
+TimeoutRRT:       0.01   # s per leg. upstream yaml says 0.02 but plan() ignores it and passes 0.01
+CorridorProgress: 7.0    # convexCover progress (m)
+CorridorRange:    3.0    # convexCover range (m)
+
+# ---- GCOPTER limits and optimizer (upstream global_planning.yaml) ----
+MaxVelMag:        4.0      # m/s
+MaxBdrMag:        2.1      # rad/s, body rate magnitude
+MaxTiltAngle:     1.05     # rad (60.2 deg)
+MinThrust:        2.0      # N, see TODO below
+MaxThrust:        12.0     # N, see TODO below
+WeightT:          20.0
+ChiVec:           [1.0e+4, 1.0e+4, 1.0e+4, 1.0e+4, 1.0e+5]   # penalty weights: pos vel omg theta thrust
+SmoothingEps:     1.0e-2
+IntegralIntervs:  16
+RelCostTol:       1.0e-5
+
+# ---- Vehicle physical parameters ----
+# TODO(vehicle): PLACEHOLDERS. These are upstream's demo quadrotor, NOT our
+# drone. Measure and replace before trusting any plan on hardware:
+#   VehicleMass  total takeoff mass (kg), with battery and payload
+#   Min/MaxThrust collective thrust range (N), e.g. from motor/prop thrust-stand data
+#   HorizDrag, VertDrag, ParasDrag  drag coefficients of GCOPTER's flatness model
+#   (flatness.hpp); 0 disables a term. Fit from flight logs or leave conservative.
+VehicleMass:      0.61     # TODO(vehicle) kg
+GravAcc:          9.8      # m/s^2
+HorizDrag:        0.70     # TODO(vehicle)
+VertDrag:         0.80     # TODO(vehicle)
+ParasDrag:        0.01     # TODO(vehicle)
+SpeedEps:         0.0001   # smoothing of |v| in the drag model (upstream)
+
+# ---- Output (ours) ----
+OutDir:           ../out
+SampleDt:         0.01     # s between rows of the path file
+YawMinSpeed:      0.3      # m/s; below this horizontal speed, hold the last heading
+YawRateMaxDeg:    90.0     # deg/s yaw-rate limit applied before smoothing
+YawSmoothTime:    0.5      # s, width of the centered moving average on yaw (0 = off)
