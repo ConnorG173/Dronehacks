@@ -124,3 +124,32 @@ map to custom sensor models. Read `SIM_SENSORS.md`; run the non-flying example
 `SIM_SENSOR_EXAMPLE.py`. ENU/FLU/XYZW differs from PX4 NED/FRD. The net collision
 envelope differs from optical mesh holes. Keep oracle-based sensor generation
 separate from portable navigation and disclose the sensor assumptions.
+
+## Camera and mount reference — model versus your physical unit
+
+The following values describe the prepared Sky Beta model. Export the actual
+OAK-D S2's calibration before copying them to a physical drone.
+
+| Quantity | Simulator declaration | Hardware status |
+|---|---|---|
+| Optical midpoint relative to model CoG, body FLU | x=0.116061m, y=-0.000160m, z=0.028838m | CAD handoff; not a ground-height measurement of your drone |
+| Optical axis / mount tilt | Forward / 0 degrees | Confirm the actual printed mount |
+| Stereo baseline | 74.94mm | Stand-in PAB OAK-D Pro calibration; read your S2's own calibration |
+| Rectified nominal FOV | 74.75 degrees horizontal, 51 vertical | Lens/rectification assumption; use actual CameraInfo |
+| Qualified mono stream | 640x400, nominal15Hz | Check your real OAK mode and delivered timestamps |
+| Depth processing/transfer delay | 30ms model estimate | Not measured on participant hardware |
+| Camera IMU | Nominal480Hz, with modelled losses | Set the estimator to the actual sensor cadence |
+
+Read actual messages in the companion; topic names alone do not prove live data:
+
+```bash
+timeout 30s ros2 topic echo /stereo/left/camera_info --once
+timeout 30s ros2 topic echo /stereo/right/camera_info --once
+```
+
+Use the current launch settings if your topic names differ. Check TF and the
+camera/IMU extrinsics together. A timed-out probe means no sample was observed
+in that window; it is not proof that a listed sensor exists or is dead. Measured
+physical braking response, Jetson processing time, mounting vibration and power
+wiring are not established by this simulator. Ask the hardware lead for the
+actual board/regulator wiring rather than inferring supply voltage from the model.
