@@ -20,7 +20,7 @@ m.port.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 m.port.bind(("127.0.0.1", 24580 + sim_id))   # fixed partner port: PX4 locks onto the first one it hears
 print(f"virtual RC for sim {sim_id} -> udp {14580 + sim_id}", flush=True)
 last_hb = 0.0
-target = 1 + sim_id          # PX4 sets MAV_SYS_ID = instance + 1
+target = 1                   # every slot keeps MAV_SYS_ID 1 (see setup_sim.sh)
 while True:
     now = time.time()
     if now - last_hb > 1.0:

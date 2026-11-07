@@ -12,7 +12,7 @@
   <model name="skybeta">
     <self_collide>false</self_collide>
     <include merge="true">
-      <uri>model://x500</uri>
+      <uri>model://skybeta_frame</uri>  <!-- x500 dynamics, Sky Beta collision footprint (sim/tools/make_skybeta_frame.py) -->
     </include>
 
     <!-- Downward rangefinder. PX4's gz_bridge reads exactly link "lidar_sensor_link", sensor "lidar". -->
@@ -91,7 +91,7 @@
     <!-- Ground truth for evaluation only. Topic names deliberately avoid /model/<name>/odometry_with_covariance,
          which PX4's gz_bridge would feed to EKF2 as perfect external vision. -->
     <plugin filename="gz-sim-odometry-publisher-system" name="gz::sim::systems::OdometryPublisher">
-      <odom_frame>map</odom_frame>
+      <odom_frame>course</odom_frame>  <!-- ground truth is in our course frame (cuVSLAM owns "map") -->
       <robot_base_frame>base_link</robot_base_frame>
       <odom_topic>/sim/ground_truth/odom</odom_topic>
       <odom_covariance_topic>/sim/ground_truth/odom_with_covariance</odom_covariance_topic>

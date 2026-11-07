@@ -79,7 +79,7 @@ Two simulators exist; use both for different things.
 
 - **Our Gazebo sim on GCP** (`docs/SIM.md`): Gazebo Harmonic + PX4 v1.16.2 SITL (the drone's firmware)
   + the organizers' own `skybeta` stack container, so cuVSLAM and **the same flight interface as the
-  drone** are in the loop. Anyone can run it in parallel. Ground truth: `/sim/ground_truth/odom`.
+  drone** are in the loop. Anyone can run it in parallel. Ground truth: `/sim/ground_truth/odom` (frame_id `course`, base_link pose, 100 Hz).
 - **The organizers' cloud lab** (this repo's `AI_CONTEXT.md`): Sky Beta in the prepared course, ROS 2
   Jazzy, its own companion code (`refnav/`, `onboard/`) that talks to `/fmu/in/*` directly, one
   teammate in control at a time. Good for visual realism; it does not run the drone's flight interface.
