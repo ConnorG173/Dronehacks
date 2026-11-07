@@ -126,7 +126,8 @@ class Mission:
                 and float(np.linalg.norm((hover - pos)[:2])) < p.settle_tol
             if early or (self.t_settled is not None and s.now - self.t_settled >= p.settle_time) or \
                (self.t_height is not None and s.now - self.t_height >= p.settle_max):
-                self.tracker.reset(tau=0.0)
+                # the plan starts at rest, so the clock can start at full rate
+                self.tracker.reset(tau=0.0, taudot=self.tracker.p.taudot_max)
                 self._go(s.now, COURSE)
             return Output(v, yr, self.state)
 

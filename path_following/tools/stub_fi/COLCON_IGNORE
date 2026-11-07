@@ -1,0 +1,1 @@
+Offline test stub (tools/e2e_docker.sh). Must never be built on the drone or in the sim: it would shadow the organizers' skybeta_flight_interface.

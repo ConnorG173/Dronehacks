@@ -67,6 +67,22 @@ Takeoff/landing (same course): climb 1.0 m/s (PX4's 3 s takeoff ramp dominates),
 course 0.15 m below hover height, descend 0.8 m/s then 0.2 m/s below 0.4 m: mission 23.4 → **22.5 s**,
 touchdown error 1–2 cm.
 
+### Path clock (course v3)
+
+Starting the course clock at full rate (the plan starts at rest) removes the last 0.5 s: course
+**17.06 s on a 17.03 s plan**. Running the clock faster than planned (`speed_factor` = `tracker.taudot_max`)
+stays clean, with the planner's tilt/thrust margins absorbing the higher accelerations:
+
+| speed_factor | mission s | course s | max xt | min clear | touches |
+|---|---|---|---|---|---|
+| 1.0 | 21.94 | 17.06 | 0.168 | 0.25 | 0 |
+| 1.1 | 20.87 | 15.98 | 0.168 | 0.30 | 0 |
+| 1.15 | 20.66 | 15.79 | 0.168 | 0.30 | 0 |
+| 1.2 | 20.51 | 15.65 | 0.168 | 0.30 | 0 |
+
+Random seeds 1/4/7 at 1.15: 11.3/7.9/11.8 s courses, 0 touches. Default stays 1.0 until Gazebo and VIO
+at speed are checked.
+
 ### Random courses (`tools/make_random_map.py`, seeds 1, 3–8; rotated layouts, random launch heading)
 
 Plans at MaxVelMag 1.2. Seeds 1, 3, 4, 8 crash the current planner (OMPL InformedRRTstar destructor

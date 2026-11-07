@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>skybeta_flight_interface</name>
+  <version>0.0.0</version>
+  <description>OFFLINE TEST STUB ONLY (path_following/tools/e2e_docker.sh): stands in for the organizers' package so mission.launch.py can be launched in the dev image. kinsim_ros.py plays the interface. Never install on the drone or in the sim.</description>
+  <maintainer email="jholli@stanford.edu">team</maintainer>
+  <license>MIT</license>
+  <exec_depend>rclpy</exec_depend>
+  <export><build_type>ament_python</build_type></export>
+</package>

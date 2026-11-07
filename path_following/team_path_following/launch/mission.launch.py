@@ -48,6 +48,7 @@ OUR_ARGUMENTS = [
     ('pose_topic', '/team/odom_map', 'map-frame pose (localization); sim ground truth: /sim/ground_truth/odom'),
     ('pose_topic_frame', 'map', 'frame of pose_topic: map | odom'),
     ('time_scale', '1.0', 'uniform slow-down (>1) of the loaded plan'),
+    ('speed_factor', '1.0', 'max path-clock rate: >1 flies faster than planned (1.15 validated in kinsim)'),
     ('z_ceiling_m', '1.6', 'map z ceiling enforced by mission_tracker'),
     ('out_dir', '/tmp/team_path_following', 'planner output directory'),
 ]
@@ -82,6 +83,7 @@ def _nodes(context):
         'pose_topic': lc('pose_topic'),
         'pose_topic_frame': lc('pose_topic_frame'),
         'time_scale': float(lc('time_scale')),
+        'tracker.taudot_max': float(lc('speed_factor')),
         'max_speed_mps': float(lc('max_speed_mps')),
         'z_ceiling_m': float(lc('z_ceiling_m')),
         'out_dir': lc('out_dir'),
