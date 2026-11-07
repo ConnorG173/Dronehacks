@@ -1,0 +1,30 @@
+# loc_fuser defaults. course_config and base_height_on_pad_m are set by the launch file.
+loc_fuser:
+  ros__parameters:
+    enable_correction: false     # milestone 1: anchor only
+    publish_tf: true
+    course_frame: course
+    tf_child_frame: map          # cuVSLAM publishes map -> odom; we publish course -> map
+    odom_frame: odom
+    status_rate_hz: 10.0
+    # anchor
+    still_speed_mps: 0.05
+    freeze_motion_m: 0.10
+    px4_timeout_s: 1.0
+    # VIO health
+    vio_timeout_s: 0.2
+    min_rate_hz: 20.0
+    jump_dist_m: 0.30
+    jump_speed_mps: 4.0
+    jump_yaw_deg: 20.0
+    # covariance model (anchor + drift per metre flown)
+    anchor_sigma_xy_m: 0.05
+    anchor_sigma_z_m: 0.03
+    anchor_sigma_yaw_deg: 2.0
+    drift_frac: 0.02
+    drift_yaw_deg_per_m: 0.5
+    # status thresholds that need a correction (milestone 3)
+    warn_sigma_xy_m: 0.15
+    error_sigma_xy_m: 0.5
+    warn_sigma_yaw_deg: 5.0
+    warn_fix_age_s: 5.0
