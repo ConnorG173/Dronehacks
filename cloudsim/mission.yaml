@@ -1,0 +1,5 @@
+# Installed as /etc/flyx/mission.yaml on the cloud sim VM only. takeoff_land.py and
+# localizer.sim load this file (as on the lab simulator), so their nodes use /clock.
+/**:
+  ros__parameters:
+    use_sim_time: true

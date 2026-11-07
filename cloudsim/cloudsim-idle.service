@@ -1,0 +1,6 @@
+[Unit]
+Description=Power off the cloud sim VM when nobody is connected
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/cloudsim-idle-shutdown
