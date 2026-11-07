@@ -79,7 +79,10 @@ def attitude_to_tilt_yaw(q_wxyz):
 
 def local_position(odom_xyz, state_z):
     """Local ENU position for the core: odom xy (what setpoints are expressed in) and PX4 local
-    height from /skybeta/state (cuVSLAM z is not height: 269 m was observed). No height -> NaN."""
+    height from /skybeta/state (cuVSLAM z is not height: 269 m was observed). No height -> NaN.
+    HALF-ASSED: setpoint z is sent as this height and relies on flight_interface's unanchored
+    z_ned = -z_enu and PX4's local z being rangefinder height (~0 on the pad), i.e. a stack
+    restarted on the pad. No odom-origin or rangefinder-offset compensation."""
     return np.array([odom_xyz[0], odom_xyz[1], np.nan if state_z is None else state_z], float)
 
 
