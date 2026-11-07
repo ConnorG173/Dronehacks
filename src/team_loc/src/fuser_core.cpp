@@ -83,7 +83,8 @@ bool VioMonitor::on_odom(double t_recv, double t_stamp, const Iso3& T) {
     const double dist = dp.norm();
     const double ang = Eigen::AngleAxisd(T_last_.linear().transpose() * T.linear()).angle();
     if (dt > 0) {
-      if (dist > std::max(p_.jump_dist_m, p_.jump_speed_mps * dt) || ang > p_.jump_yaw_rad) {
+      if (dist > std::max(p_.jump_dist_m, p_.jump_speed_mps * dt) ||
+          ang > std::max(p_.jump_yaw_rad, p_.jump_yaw_rate_radps * dt)) {
         jump = true;
         jump_latched_ = true;
       } else {
@@ -272,6 +273,13 @@ void CorrectionFilter::slew(Correction4& a, double dt) const {
   a.t += (n > lim && n > 0) ? Vec3(d * (lim / n)) : d;
   const double dy = wrap_pi(est_.yaw - a.yaw), ly = p_.slew_radps * dt;
   a.yaw = wrap_pi(a.yaw + std::clamp(dy, -ly, ly));
+}
+
+void CorrectionFilter::inflate(double sxy, double syaw) {
+  P_(0, 0) = std::max(P_(0, 0), sxy * sxy);
+  P_(1, 1) = std::max(P_(1, 1), sxy * sxy);
+  P_(3, 3) = std::max(P_(3, 3), syaw * syaw);
+  rej_.clear();
 }
 
 CorrectionFilter::Mat4 CorrectionFilter::pose_cov(const Iso3& q) const {

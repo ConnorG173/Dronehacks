@@ -203,6 +203,10 @@ class Harness(Node):
         self.rows = []                             # (t, err_out_h, err_raw_h, err_out_yaw, err_raw_yaw, dist)
         self.status = []
         self.mstat = []
+        self.jump = None
+        if a.vio_jump:
+            s_, dx = (float(v) for v in a.vio_jump.split(":"))
+            self.jump = [truth.t_path0 + s_, dx, False]
         self.drop = None
         if a.dropout:
             s, d = (float(v) for v in a.dropout.split(":"))
@@ -229,6 +233,10 @@ class Harness(Node):
         self.vio_yaw_err += math.radians(self.a.yaw_drift) * ds
         dp_odom = self.T_odom_course_R @ rotz(self.vio_yaw_err) @ dp * np.array([self.a.scale, self.a.scale, 1.0])
         self.vio_p = self.vio_p + dp_odom
+        if self.jump is not None and not self.jump[2] and time.monotonic() - self.t0 >= self.jump[0]:
+            self.vio_p = self.vio_p + np.array([self.jump[1], 0.0, 0.0])   # odom teleports along odom x
+            self.vio_yaw_err += math.radians(10.0)                         # and 10 deg
+            self.jump[2] = True
         self.p_prev = p.copy()
         R_odom = self.T_odom_course_R @ rotz(self.vio_yaw_err) @ R
         return self.vio_p.copy(), R_odom
@@ -359,6 +367,7 @@ def main():
     ap.add_argument("--time-scale", type=float, default=0.7, help="path playback speed factor")
     ap.add_argument("--depth-hz", type=float, default=10.0)
     ap.add_argument("--dropout", default="", help="VIO+depth dropout 'start_s:duration_s' after path start")
+    ap.add_argument("--vio-jump", default="", help="VIO teleport 'start_s:dx_m' after path start (cuVSLAM reset)")
     ap.add_argument("--no-correction", action="store_true")
     ap.add_argument("--out", default="")
     a = ap.parse_args()
@@ -394,7 +403,7 @@ def main():
     ms = [m for _, m in n.mstat if "ms_match" in m]
     summary = {
         "scenario": {"yaw_drift_deg_per_m": a.yaw_drift, "scale": a.scale, "time_scale": a.time_scale,
-                     "dropout": a.dropout, "correction": not a.no_correction},
+                     "dropout": a.dropout, "vio_jump": a.vio_jump, "correction": not a.no_correction},
         "path_m": round(float(R[-1, 5]), 2),
         "corrected": {"rms": float(np.sqrt(np.mean(out ** 2))), "max": float(out.max()), "end": float(out[-1]),
                       "yaw_rms_deg": float(np.sqrt(np.mean(R[air, 3] ** 2))), "z_rms": float(np.sqrt(np.mean(R[air, 7] ** 2)))},

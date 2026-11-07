@@ -13,6 +13,7 @@ for d in sys.argv[1:]:
     sc = s["scenario"]
     name = (f"{os.path.basename(d.rstrip('/'))}: yaw {sc['yaw_drift_deg_per_m']}°/m, scale {sc['scale']}, "
             f"speed ×{sc['time_scale']}" + (f", dropout {sc['dropout']}" if sc["dropout"] else "")
+            + (f", VIO jump {sc['vio_jump']}" if sc.get("vio_jump") else "")
             + ("" if sc["correction"] else ", correction off"))
     print(f"| {name} | {s['path_m']:.1f} | {c['rms']:.3f} / {c['max']:.3f} / {c['end']:.3f} | "
           f"{r['rms']:.3f} / {r['max']:.3f} / {r['end']:.3f} | {c['yaw_rms_deg']:.1f} / {r['yaw_rms_deg']:.1f} | "

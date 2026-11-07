@@ -100,6 +100,16 @@ TEST(Vio, RateJumpAndPath) {
   EXPECT_GT(v.age(t + 1.0), 0.9);
 }
 
+TEST(Vio, LongGapWithPlausibleMotionIsNotAJump) {
+  VioMonitor v(VioParams{});
+  EXPECT_FALSE(v.on_odom(0.0, 0.0, at(0, 0, 0)));
+  // 1 s without VIO, then 0.7 m and 60 deg later: plausible for a drone, not a teleport.
+  EXPECT_FALSE(v.on_odom(1.0, 1.0, at(0.7, 0, 60.0 * M_PI / 180.0)));
+  EXPECT_FALSE(v.jump_latched());
+  // The same 60 deg within one frame is a jump.
+  EXPECT_TRUE(v.on_odom(1.033, 1.033, at(0.7, 0, 0)));
+}
+
 TEST(Status, Levels) {
   StatusParams p;
   StatusInputs in;

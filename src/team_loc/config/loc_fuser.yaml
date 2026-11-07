@@ -17,6 +17,10 @@ loc_fuser:
     jump_dist_m: 0.30
     jump_speed_mps: 4.0
     jump_yaw_deg: 20.0
+    jump_yaw_rate_deg_per_s: 170.0   # a longer gap may turn more before it counts as a jump
+    jump_sigma_xy_m: 0.5             # after a jump: widen the correction, re-acquire from fixes
+    jump_sigma_yaw_deg: 15.0
+    jump_recover_fixes: 3
     # covariance model (anchor + drift per metre flown)
     anchor_sigma_xy_m: 0.05
     anchor_sigma_z_m: 0.03

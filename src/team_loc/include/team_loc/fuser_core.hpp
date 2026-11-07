@@ -67,7 +67,8 @@ class AnchorTracker {
 struct VioParams {
   double jump_dist_m = 0.30;     // a step larger than max(this, jump_speed_mps * dt) is a jump
   double jump_speed_mps = 4.0;
-  double jump_yaw_rad = 20.0 * M_PI / 180.0;
+  double jump_yaw_rad = 20.0 * M_PI / 180.0;   // a rotation larger than max(this, rate * dt) is a jump
+  double jump_yaw_rate_radps = 3.0;
   double rate_window_s = 1.0;
   double speed_alpha = 0.3;      // EMA weight of the newest speed sample
 };
@@ -184,6 +185,8 @@ class CorrectionFilter {
   Result update(const Iso3& q, const Vec3& z, const Mat3& R, double* d2_out = nullptr);
   // Move `applied` toward the estimate by at most the slew limits over dt.
   void slew(Correction4& applied, double dt_s) const;
+  // After a VIO jump: widen the state uncertainty so fixes can pull it back.
+  void inflate(double sigma_xy_m, double sigma_yaw_rad);
 
   // Covariance (x, y, z, yaw) of the course pose C * q for a current anchor-only pose q.
   Mat4 pose_cov(const Iso3& q) const;

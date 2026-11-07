@@ -80,6 +80,10 @@ class LocFuser : public rclcpp::Node {
     vp.jump_dist_m = declare_parameter<double>("jump_dist_m", vp.jump_dist_m);
     vp.jump_speed_mps = declare_parameter<double>("jump_speed_mps", vp.jump_speed_mps);
     vp.jump_yaw_rad = declare_parameter<double>("jump_yaw_deg", 20.0) * M_PI / 180.0;
+    vp.jump_yaw_rate_radps = declare_parameter<double>("jump_yaw_rate_deg_per_s", 170.0) * M_PI / 180.0;
+    jump_sigma_xy_m_ = declare_parameter<double>("jump_sigma_xy_m", 0.5);
+    jump_sigma_yaw_rad_ = declare_parameter<double>("jump_sigma_yaw_deg", 15.0) * M_PI / 180.0;
+    jump_recover_fixes_ = declare_parameter<int>("jump_recover_fixes", 3);
     vio_ = VioMonitor(vp);
 
     sp_.vio_timeout_s = declare_parameter<double>("vio_timeout_s", sp_.vio_timeout_s);
@@ -181,8 +185,14 @@ class LocFuser : public rclcpp::Node {
     const double t = now_s();
     const Iso3 T_odom_base = to_iso(m.pose.pose);
 
-    if (vio_.on_odom(t, stamp_s(m.header.stamp), T_odom_base))
-      RCLCPP_ERROR(get_logger(), "VIO jump detected: status ERROR until the next arming");
+    if (vio_.on_odom(t, stamp_s(m.header.stamp), T_odom_base)) {
+      // A VIO reset/teleport: the correction must absorb it. Widen it and let fixes pull it back;
+      // ERROR stays until enough fixes agree (or the next arming).
+      filter_->inflate(jump_sigma_xy_m_, jump_sigma_yaw_rad_);
+      fixes_since_jump_ = 0;
+      RCLCPP_ERROR(get_logger(), "VIO jump detected: status ERROR until %d fixes re-acquire%s",
+                   jump_recover_fixes_, correction_enabled_ ? "" : " (correction off: until the next arming)");
+    }
     const bool was_anchored = anchor_.anchored();
     if (anchor_.on_odom(t, T_odom_base, vio_.speed(), vo_ok())) {
       path_at_anchor_ = vio_.path_length();
@@ -203,7 +213,7 @@ class LocFuser : public rclcpp::Node {
     } else if (correction_enabled_ && have_prev_) {
       const double ds = (T_odom_base.translation() - prev_odom_.translation()).norm();
       const double dt = ts - prev_stamp_;
-      if (dt > 0 && !vio_.jump_latched()) {
+      if (dt > 0) {
         filter_->predict(ds, dt);
         filter_->slew(applied_correction_, dt);
       }
@@ -286,7 +296,7 @@ class LocFuser : public rclcpp::Node {
 
   void on_fix(const geometry_msgs::msg::PoseWithCovarianceStamped& m) {
     ++n_fix_in_;
-    if (!correction_enabled_ || anchor_.state() != AnchorTracker::State::Frozen || vio_.jump_latched()) return;
+    if (!correction_enabled_ || anchor_.state() != AnchorTracker::State::Frozen) return;
     const double t = stamp_s(m.header.stamp);
     if (!odom_buf_.empty() && odom_buf_.back().first - t > max_fix_lag_s_) {
       ++n_fix_stale_;
@@ -307,8 +317,13 @@ class LocFuser : public rclcpp::Node {
     double d2 = 0;
     const auto r = filter_->update(q, z, R, &d2);
     last_fix_d2_ = d2;
-    if (r == CorrectionFilter::Result::Accepted || r == CorrectionFilter::Result::Reacquired)
+    if (r == CorrectionFilter::Result::Accepted || r == CorrectionFilter::Result::Reacquired) {
       t_last_fix_ = now_s();
+      if (vio_.jump_latched() && ++fixes_since_jump_ >= jump_recover_fixes_) {
+        vio_.clear_jump();
+        RCLCPP_WARN(get_logger(), "recovered from the VIO jump: %d fixes accepted", fixes_since_jump_);
+      }
+    }
     if (r == CorrectionFilter::Result::Reacquired)
       RCLCPP_WARN(get_logger(), "re-acquired from %d consistent rejected fixes: correction (%.2f, %.2f) m, %.1f deg",
                   3, filter_->est().t.x(), filter_->est().t.y(), filter_->est().yaw * 180.0 / M_PI);
@@ -413,6 +428,8 @@ class LocFuser : public rclcpp::Node {
   double prev_stamp_ = 0, t_last_fix_ = -1, last_fix_d2_ = 0, vio_floor_xy_m_ = 0.02, max_fix_lag_s_ = 1.0;
   double slew_residual_m_ = 0;
   bool have_prev_ = false;
+  double jump_sigma_xy_m_ = 0.5, jump_sigma_yaw_rad_ = 0.26;
+  int jump_recover_fixes_ = 3, fixes_since_jump_ = 0;
   long n_fix_in_ = 0, n_fix_stale_ = 0;
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr sub_fix_;
   bool correction_enabled_ = false, publish_tf_ = true, armed_ = false, map_odom_tf_ok_ = false;
