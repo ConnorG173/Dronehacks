@@ -1,4 +1,4 @@
-"""streamer.py: path.bin -> course frame, T math, pad init, path clock + lead, fence."""
+"""core: path.bin -> course frame, T math, pad init, path clock + lead, fence, attitude helpers."""
 import math
 import os
 import sys
@@ -8,7 +8,7 @@ import pytest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [os.path.join(HERE, ".."), HERE]
-from localizer import streamer as S  # noqa: E402
+from localizer.core import clock as C, frames as F, path as P  # noqa: E402
 from px4_model import PX4PosModel  # noqa: E402
 
 PATH = os.path.join(HERE, "..", "data", "course_v3_path.bin")
@@ -21,7 +21,7 @@ CHECKPOINTS = [   # course_v3.yaml boxes: centre, half-extents
 
 @pytest.fixture(scope="module")
 def cpath():
-    return S.path_to_course(S.load_path(PATH), PAD, 0.0)
+    return P.path_to_course(P.load_path(PATH), PAD, 0.0)
 
 
 def test_path_starts_at_pad_hover_and_visits_checkpoints(cpath):
@@ -34,7 +34,7 @@ def test_path_starts_at_pad_hover_and_visits_checkpoints(cpath):
         hits = np.nonzero(inside[k:])[0]
         assert len(hits), (cx, cy)
         k += int(hits[0])
-    assert all(S.inside_fence(p, margin_m=0.2) for p in cpath.xy)
+    assert all(F.inside_fence(p, margin_m=0.2) for p in cpath.xy)
 
 
 def test_path_to_course_matches_readme_worked_example():
@@ -44,17 +44,17 @@ def test_path_to_course_matches_readme_worked_example():
     rows[0, 1:4] = (2, 0, -1.5)
     rows[1, 1:4] = (0, 1, 0)
     rows[:, 10] = math.pi / 2
-    p = S.path_to_course(rows, (2, 3), math.pi / 2)
+    p = P.path_to_course(rows, (2, 3), math.pi / 2)
     assert np.allclose(p.xy, [(2, 5), (3, 3)]) and np.allclose(p.z, (1.5, 0))
     assert np.allclose(p.yaw, 0)
 
 
 def test_transform_roundtrip_and_pad_init():
-    T, why = S.pad_init((0.02, -0.01), math.radians(1), 1.0, 0.6, PAD, 0.0)
+    T, why = F.pad_init((0.02, -0.01), math.radians(1), 1.0, 0.6, PAD, 0.0)
     assert why == "ok"
     p, yaw = T.to_course((0.02, -0.01), math.radians(1))
     assert np.allclose(p, PAD) and yaw == pytest.approx(0.0)
-    q, yq = T.to_odom(*T.to_course((1.3, -0.7), 0.4))
+    q, yq = T.to_local(*T.to_course((1.3, -0.7), 0.4))
     assert np.allclose(q, (1.3, -0.7)) and yq == pytest.approx(0.4)
 
 
@@ -64,7 +64,7 @@ def test_transform_roundtrip_and_pad_init():
     (((0.0, 0.0), 0.0, 179.0, 0.5), "disagrees"),           # the 180-deg-roll garbage seen before
 ])
 def test_pad_init_refuses(args, needle):
-    T, why = S.pad_init(*args, PAD, 0.0)
+    T, why = F.pad_init(*args, PAD, 0.0)
     assert T is None and needle in why
 
 
@@ -73,7 +73,7 @@ def test_course_velocity_and_acceleration_are_derivatives_of_position():
     rows = np.zeros((2, 12))
     rows[:, 4:7] = (4, 0, -1)                # 4 m/s forward, 1 m/s up
     rows[:, 7:10] = (0, 2, 0)                # 2 m/s^2 to the right
-    p = S.path_to_course(rows, (2, 3), math.pi / 2)
+    p = P.path_to_course(rows, (2, 3), math.pi / 2)
     assert np.allclose(p.vel, [(0, 4, 1)] * 2) and np.allclose(p.acc, [(2, 0, 0)] * 2)
 
 
@@ -97,7 +97,7 @@ def follow(clock, vehicle, dt=0.05, n=10000):
 
 
 def test_clock_ramps_runs_at_scale_and_ends_at_rest_on_the_goal(cpath):
-    c = S.PathClock(cpath, scale=0.5)
+    c = C.PathClock(cpath, scale=0.5)
     sps = follow(c, lambda c: np.r_[c.path.at(c.tau)[:2]])          # vehicle exactly on p(tau)
     assert c.done and not c.stalled
     t_wall = 0.05 * len(sps)
@@ -109,7 +109,7 @@ def test_clock_ramps_runs_at_scale_and_ends_at_rest_on_the_goal(cpath):
 
 
 def test_lead_is_on_the_path_and_one_over_kp_ahead(cpath):
-    c = S.PathClock(cpath, scale=1.0, lead_s=1 / 0.95)
+    c = C.PathClock(cpath, scale=1.0, lead_s=1 / 0.95)
     c.tau, c.r = 5.0, 1.0
     sp = c.step(0.05, cpath.state(5.0)[0])
     xy, z, _ = cpath.at(sp.tau + 1 / 0.95)
@@ -118,7 +118,7 @@ def test_lead_is_on_the_path_and_one_over_kp_ahead(cpath):
 
 
 def test_clock_slows_on_lag_and_stops_but_not_on_overshoot(cpath):
-    c = S.PathClock(cpath, scale=1.0, e_ok_m=0.3, e_stop_m=0.6)
+    c = C.PathClock(cpath, scale=1.0, e_ok_m=0.3, e_stop_m=0.6)
     c.tau, c.r = 8.0, 1.0
     p, v, _, _ = cpath.state(8.0)
     t = v / np.linalg.norm(v)
@@ -141,7 +141,7 @@ def run_closed_loop(path, scale, model_kw=None, lead_s=1 / 0.95, fault_at=None):
     """20 Hz node, flight_interface 10 Hz zero-order hold, PX4 model at 200 Hz."""
     xy0, z0, _ = path.at(0.0)
     m = PX4PosModel(np.r_[xy0, z0], **(model_kw or {}))
-    c = S.PathClock(path, scale, lead_s=lead_s)
+    c = C.PathClock(path, scale, lead_s=lead_s)
     xs, errs, stalls, hold, fi = [], [], 0, None, None
     for k in range(int(80 / 0.05)):
         sp = c.step(0.05, m.x)
@@ -166,7 +166,7 @@ def cross_track(path, xs):
 
 
 def test_px4_model_tracks_course_v3_at_1_mps_without_stopping(cpath):
-    scale = S.time_scale_for(cpath, 1.0)
+    scale = P.time_scale_for(cpath, 1.0)
     xs, errs, stalls, t, _ = run_closed_loop(cpath, scale)
     assert stalls == 0 and errs.max() < 0.15
     assert cross_track(cpath, xs).max() < 0.10
@@ -175,14 +175,14 @@ def test_px4_model_tracks_course_v3_at_1_mps_without_stopping(cpath):
 
 
 def test_lead_tolerates_a_wrong_kp_by_slowing_not_stopping(cpath):
-    scale = S.time_scale_for(cpath, 1.0)
+    scale = P.time_scale_for(cpath, 1.0)
     for kp in (0.7, 1.3):                                 # the drone's MPC_XY_P is not the default
         xs, errs, stalls, _, _ = run_closed_loop(cpath, scale, {"kp_xy": kp})
         assert stalls == 0 and cross_track(cpath, xs).max() < 0.15
 
 
 def test_fault_hold_on_the_path_point_brakes_within_half_a_metre(cpath):
-    scale = S.time_scale_for(cpath, 1.0)
+    scale = P.time_scale_for(cpath, 1.0)
     xs, _, _, _, hold = run_closed_loop(cpath, scale, fault_at=24.0)   # ~1 m/s on the tube leg
     k = int(24.0 / 0.05)
     assert np.linalg.norm(xs[k:] - hold, axis=1).max() < 0.5
@@ -190,12 +190,66 @@ def test_fault_hold_on_the_path_point_brakes_within_half_a_metre(cpath):
 
 
 def test_time_scale_caps_speed(cpath):
-    s = S.time_scale_for(cpath, 1.0)
+    s = P.time_scale_for(cpath, 1.0)
     assert cpath.speed.max() == pytest.approx(2.42, abs=0.05)
     assert s * cpath.speed.max() == pytest.approx(1.0)
-    assert S.time_scale_for(cpath, 10.0) == 1.0
+    assert P.time_scale_for(cpath, 10.0) == 1.0
 
 
 def test_fence():
-    assert S.inside_fence((2.7, -2.7)) and not S.inside_fence((2.8, 0))
-    assert np.allclose(S.clamp_to_fence((5, -5)), (2.749, -2.749))
+    assert F.inside_fence((2.7, -2.7)) and not F.inside_fence((2.8, 0))
+    assert np.allclose(F.clamp_to_fence((5, -5)), (2.749, -2.749))
+
+
+# ----------------------------------------------------------------------------- frames / attitude
+# (ported from the deleted test_bev.py: the attitude helpers moved from bev.py to core/frames.py)
+
+def q_px4(roll_deg=0.0, pitch_deg=0.0, yaw_deg=0.0):
+    """PX4 attitude quaternion (w, x, y, z), FRD -> NED, ZYX Euler (PX4 conventions:
+    roll + = right wing down, pitch + = nose up, yaw + = clockwise from north)."""
+    r, p, y = (math.radians(v) / 2 for v in (roll_deg, pitch_deg, yaw_deg))
+    qx = np.array([math.cos(r), math.sin(r), 0, 0])
+    qy = np.array([math.cos(p), 0, math.sin(p), 0])
+    qz = np.array([math.cos(y), 0, 0, math.sin(y)])
+
+    def mul(a, b):
+        w1, x1, y1, z1 = a
+        w2, x2, y2, z2 = b
+        return np.array([w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2, w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+                         w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2, w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2])
+    return mul(qz, mul(qy, qx))
+
+
+@pytest.mark.parametrize("yaw", [0, 37, 90, -150, 180])
+def test_tilt_independent_of_yaw(yaw):
+    assert F.tilt_deg(F.px4_to_enu_flu(q_px4(4, -7, yaw))) == pytest.approx(
+        math.degrees(math.acos(math.cos(math.radians(4)) * math.cos(math.radians(7)))))
+
+
+def test_px4_yaw_maps_to_enu_ccw():
+    # PX4 yaw +90 (clockwise from north = facing east) is ENU yaw 0; yaw 0 (north) is ENU +90
+    assert F.yaw_of(F.px4_to_enu_flu(q_px4(yaw_deg=90))) == pytest.approx(0, abs=1e-12)
+    assert F.yaw_of(F.px4_to_enu_flu(q_px4(yaw_deg=0))) == pytest.approx(math.pi / 2)
+    for yd in (0, 30, 90, -120):     # yaw_ned_to_enu agrees with the rotation matrix
+        assert F.wrap(F.yaw_of(F.px4_to_enu_flu(q_px4(yaw_deg=yd))) - F.yaw_ned_to_enu(math.radians(yd))) \
+            == pytest.approx(0, abs=1e-12)
+
+
+def test_ned_enu_is_flight_interface_convention():
+    # skybeta flight_interface: NED = (y_enu, x_enu, -z_enu), yaw_ned = pi/2 - yaw_enu
+    assert np.allclose(F.enu_to_ned((1.0, 2.0, 3.0)), (2.0, 1.0, -3.0))
+    assert np.allclose(F.ned_to_enu(F.enu_to_ned((0.3, -0.4, 1.2))), (0.3, -0.4, 1.2))
+    assert F.yaw_enu_to_ned(0.0) == pytest.approx(math.pi / 2)
+    assert F.yaw_ned_to_enu(F.yaw_enu_to_ned(0.7)) == pytest.approx(0.7)
+
+
+def test_pad_init_checks_can_be_switched_off():
+    # simulator: PX4's local frame is neither at the pad nor heading-aligned; T absorbs both
+    T, why = F.pad_init((4.0, -1.0), math.radians(90), None, None, PAD, 0.0,
+                        max_offset_m=None, max_yaw_deg=None, max_tilt_diff_deg=None)
+    assert why == "ok"
+    assert np.allclose(T.to_course((4.0, -1.0)), PAD)
+    assert np.allclose(T.to_course((4.0, 0.0)), (PAD[0] + 1.0, PAD[1]))     # local +y (forward) = course +x
+    assert np.allclose(T.vec_to_local((1.0, 0.0, 0.5)), (0.0, 1.0, 0.5))
+    T, why = F.pad_init((0, 0), 0.0, 1.0, None, PAD, 0.0)                  # tilt check on, no IMU yet
+    assert T is None and "waiting" in why
