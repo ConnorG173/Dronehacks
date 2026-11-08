@@ -8,6 +8,9 @@ set -eo pipefail
 export SIM_ID="${1:-${SIM_ID:-0}}"
 S="$(cd "$(dirname "$0")" && pwd)/scripts"
 source "$S/common.sh"
+# Stop the recorder with SIGINT first so its .mcap gets a footer (killing tmux leaves it unreadable by most tools).
+REC="[r]os2 bag record -s mcap.*recordings/sim${SIM_ID}_"
+if pkill -INT -f "$REC" 2>/dev/null; then for _ in $(seq 1 20); do pgrep -f "$REC" >/dev/null || break; sleep 0.5; done; fi
 tmux kill-session -t "$TMUX_SESSION" 2>/dev/null || true
 docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
 # Killing tmux does NOT stop `gz sim` (it survives SIGHUP). A leftover server in the same partition makes
@@ -48,5 +51,5 @@ tmux new-window -t "$TMUX_SESSION" -n viz "$E COURSE=${COURSE:-planner/config/co
 if [[ -f "$HOME/recordings/ENABLE_sim$SIM_ID" ]]; then
   tmux new-window -t "$TMUX_SESSION" -n rec "sleep 20; $E bash $S/record_viz.sh; bash"
 fi
-tmux new-window -t "$TMUX_SESSION" -n foxglove "source /opt/ros/humble/setup.bash && ROS_DOMAIN_ID=$ROS_DOMAIN_ID FASTRTPS_DEFAULT_PROFILES_FILE=$FASTRTPS_DEFAULT_PROFILES_FILE ros2 launch foxglove_bridge foxglove_bridge_launch.xml port:=$FOXGLOVE_PORT; bash"
+tmux new-window -t "$TMUX_SESSION" -n foxglove "source /opt/ros/humble/setup.bash && ROS_DOMAIN_ID=$ROS_DOMAIN_ID FASTRTPS_DEFAULT_PROFILES_FILE=$FASTRTPS_DEFAULT_PROFILES_FILE ros2 launch foxglove_bridge foxglove_bridge_launch.xml port:=$FOXGLOVE_PORT use_sim_time:=true; bash"
 echo "sim $SIM_ID starting: tmux attach -t $TMUX_SESSION   (ROS_DOMAIN_ID=$ROS_DOMAIN_ID, foxglove :$FOXGLOVE_PORT, MAVLink :$MAV_PORT)"

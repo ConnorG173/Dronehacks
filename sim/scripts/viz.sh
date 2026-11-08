@@ -4,4 +4,5 @@ set -eo pipefail
 source "$(dirname "$0")/common.sh"
 source /opt/ros/humble/setup.bash
 export REPO
-exec python3 "$REPO/sim/tools/viz_course.py"
+# Sim time: the drone, TF and VIO are stamped from /clock; wall-clock stamps put the course ~30 years away in Foxglove.
+exec python3 "$REPO/sim/tools/viz_course.py" --ros-args -p use_sim_time:=true
