@@ -7,7 +7,7 @@ validated for tonight, which tuning work must not change:
 
 Only these pass through (everything else is fixed here):
     mission_preset (hover | first_leg | course; default hover), pose_topic, pose_topic_frame,
-    base_height_on_pad_m, repo_root, planner_binary, out_dir, allow_mode_request (sim only, default false).
+    base_height_on_pad_m, repo_root, planner_binary, out_dir, allow_mode_request and tracker_use_sim_time (sim only, default false).
 
     ros2 launch team_path_following conservative.launch.py mission_preset:=course \
         pose_topic:=/visual_slam/tracking/odometry pose_topic_frame:=odom base_height_on_pad_m:=0.08
@@ -42,6 +42,7 @@ PASS = [
     ('planner_binary', '', "default <repo_root>/planner/build/gcopter_planner"),
     ('out_dir', '/tmp/team_path_following', 'planner output directory'),
     ('allow_mode_request', 'false', 'SIM ONLY (Gazebo pilot.py): let the interface accept mode requests'),
+    ('tracker_use_sim_time', 'false', 'SIM ONLY: mission_tracker on /clock'),
 ]
 
 

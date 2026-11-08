@@ -124,6 +124,7 @@ class MissionTracker(Node):
 
         gp = lambda k: self.get_parameter(k).value  # noqa: E731
         self.gp = gp
+        self._sim_time = bool(self.get_parameter('use_sim_time').value)
         tp = TrackerParams(**{k: gp('tracker.' + k) for k in vars(TrackerParams())
                               if k not in ('v_max', 'z_ceiling')})
         tp.v_max = gp('max_speed_mps') - gp('speed_margin_mps')
@@ -295,6 +296,10 @@ class MissionTracker(Node):
 
     # ------------------------------------------------------------ callbacks
     def now(self):
+        # sim only: with use_sim_time the node runs on Gazebo's /clock, so a slow sim (RTF < 1) stretches
+        # wall time instead of faking lag. On the drone use_sim_time is false: monotonic wall time.
+        if self._sim_time:
+            return self.get_clock().now().nanoseconds * 1e-9
         return time.monotonic()
 
     def pose_cb(self, msg):

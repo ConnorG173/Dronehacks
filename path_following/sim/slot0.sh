@@ -44,7 +44,7 @@ fly)
   mkdir -p "$REPO/$out"
   tmux kill-window -t "$TMUX_SESSION:team" 2>/dev/null || true
   tmux new-window -d -t "$TMUX_SESSION" -n team \
-    "SIM_ID=0 bash $REPO/sim/scripts/competitor.sh team_path_following ${LAUNCH:-mission.launch.py} allow_mode_request:=true \
+    "SIM_ID=0 bash $REPO/sim/scripts/competitor.sh team_path_following ${LAUNCH:-mission.launch.py} allow_mode_request:=true tracker_use_sim_time:=${SIM_TIME:-true} \
        $POSE_ARGS mission_preset:=course course_config:=/root/team/$COURSE planner_binary:=/root/team/planner/build/gcopter_planner \
        out_dir:=/root/team/$out/plan $* 2>&1 | tee $REPO/$out/launch.log; bash"
   dexec -d "$CONTAINER" bash -lc "$IN_C && ros2 bag record -s mcap -o /root/team/$out/bag \

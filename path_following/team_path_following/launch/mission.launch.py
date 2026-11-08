@@ -60,6 +60,7 @@ OUR_ARGUMENTS = [
     ('return_config', '', "return leg: '' off | 'reverse' (goal -> start) | config path (needs organizers' OK)"),
     ('return_z_ceiling_m', '1.6', 'map z ceiling on the return leg'),
     ('out_dir', '/tmp/team_path_following', 'planner output directory'),
+    ('tracker_use_sim_time', 'false', 'SIM ONLY: mission_tracker on /clock (flight_interface stays on wall time)'),
 ]
 
 
@@ -103,6 +104,7 @@ def _nodes(context):
         'return_config': lc('return_config'),
         'return_z_ceiling_m': float(lc('return_z_ceiling_m')),
         'out_dir': lc('out_dir'),
+        'use_sim_time': lc('tracker_use_sim_time').lower() == 'true',
     })
     tracker = Node(
         package='team_path_following',
