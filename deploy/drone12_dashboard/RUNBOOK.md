@@ -9,6 +9,16 @@
 > - No sim check: Gazebo only has the old walls.
 > - `first_leg` only exists for the old Gate B route (`bash run.sh first_leg <bh> gateb`).
 
+> **Heading fix (2026-11-08):** PX4 may now fuse the gyro heading-corrected VIO (`/team_heading/odometry`,
+> enabled by the marker `/root/team_ws/claude/mavlink_usb/heading_fix_enabled`). `run.sh` reads the
+> bridge's `input_topic` and steers on exactly the topic PX4 fuses. It prints `pose source = ...`, so check
+> that line. If the tracker steered on a different heading than PX4, its velocity commands would rotate by
+> the correction, which reaches +15–25° per lap.
+> - **Before the pilot arms with the heading fix on:** run `bash calibrate.sh`. The drone must sit still on
+>   the pad, disarmed. The script waits until it prints `calibrated`.
+> - It sends only a calibration request, not the dashboard's Reset button, which also sends a Hold.
+> - Pressing Reset instead is safe: our first twist clears that Hold.
+
 The same flight as `drone-conservative-v1`, adapted to the stack now running on drone 12. That flight is:
 - Gate B route;
 - plan MaxVelMag 1.2, slowed 1.4x (peak about 0.86 m/s, course about 27 s);
@@ -45,7 +55,10 @@ bash build.sh        # package + planner into the kit's own build/install (about
    - no mission_tracker running;
    - VIO at about 30 Hz;
    - no `/skybeta/setpoint/pose`;
-   - PX4 local position flowing.
+   - PX4 local position flowing;
+   - the topic PX4 fuses, and if the heading fix is on, `calibrated: true`.
+
+   With the heading fix on, run `bash calibrate.sh` last, with the drone still on the pad.
 5. **Start:** `bash run.sh hover <base_height>`, later `bash run.sh course <base_height>`. Then `tail -f ~/team_ws/bags/cv1_hover_*.log` until you see `plan ready`. Nothing moves yet.
 6. **Offboard:** `/skybeta/state` must show `nav_state_name: OFFBOARD`. The dashboard's grounded selector does this at startup. If PX4 is in another mode (for example AUTO_LOITER after a landing), the pilot or operator puts it in Offboard while disarmed. **Our code never changes modes or arms.**
 7. **Pilot arms.** Our node takes off at once: 1 m/s climb to 1.0 m. Then:
@@ -91,3 +104,5 @@ Results:
 - Lag 0.66/0.18 comes from Gazebo's x500, not the Sky Beta.
 - In Gazebo this ran with the organizers' stock interface standing in for the dashboard's interface, not with the USB MAVLink link.
 - Offboard entry depends on the dashboard's selector or the pilot.
+- Not flown on the heading-fixed pose (`/team_heading/odometry`) in Gazebo. It's the same message type and
+  timestamps as the levelled VIO; only yaw differs, and the launch pose captured at arming absorbs any offset.
