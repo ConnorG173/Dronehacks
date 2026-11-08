@@ -1,0 +1,74 @@
+# drone-conservative-v1 on drone 12's dashboard stack
+
+The same flight as `drone-conservative-v1`, adapted to the stack now running on drone 12. That flight is:
+- Gate B route;
+- plan MaxVelMag 1.2, slowed 1.4x (peak about 0.86 m/s, course about 27 s);
+- lag 0.66/0.18;
+- z ceiling 1.6 m.
+
+The safety pilot is in charge the whole time.
+
+## How it fits the current drone
+
+| On the drone now (teammates' dashboard) | What this does |
+|---|---|
+| The competitor window runs `mavlink_usb/dashboard.launch.py`: the flight interface, the dashboard, the USB MAVLink adapter (which carries vision and setpoints to PX4), a depth worker and the Offboard selector | Leaves all of it running. Never stop that launch: the vision feed to PX4 lives in it. |
+| The flight interface follows whichever setpoint arrived last (pose or twist), max 1.0 m/s, altitude 0.3–2.0 m | Starts only `mission_tracker` (no second interface). It publishes `/skybeta/setpoint/twist` into the dashboard's interface. |
+| Leveled cuVSLAM on `/claude/vio_leveled/odometry` is what PX4 fuses | Uses the same topic as its pose. |
+| Dashboard Hold / Land / KILL | Still work. Our node publishes nothing until the drone is armed in Offboard. The moment the dashboard sends any pose setpoint, or the interface reports Hold, it stops for good. KILL disarms, and our node then aborts. |
+
+## One-time setup (on the ground, disarmed)
+
+```bash
+ssh skybeta
+cd ~/team_ws/team_staging/conservative_v1/kit
+bash build.sh        # package + planner into the kit's own build/install (about 2-5 min of CPU; never while flying)
+```
+
+## Each flight
+
+1. **Place the drone** centred on the launch mark, nose +x (into the maze). The course frame is the pose at arming.
+2. **Measure `base_height_on_pad_m`** once: floor to OAK lens centre, minus 0.0304 m. Expect 0.05–0.12.
+3. **Release the dashboard.** Don't take control or start a course in it. Leave it open to watch, and for Hold, Land and KILL.
+4. **Preflight (read-only):** `bash preflight.sh`. You want all of these:
+   - planner and package OK;
+   - exactly 1 flight_interface;
+   - no mission_tracker running;
+   - VIO at about 30 Hz;
+   - no `/skybeta/setpoint/pose`;
+   - PX4 local position flowing.
+5. **Start:** `bash run.sh hover <base_height>`. Then `tail -f ~/team_ws/bags/cv1_hover_*.log` until you see `plan ready`. Nothing moves yet.
+6. **Offboard:** `/skybeta/state` must show `nav_state_name: OFFBOARD`. The dashboard's grounded selector does this at startup. If PX4 is in another mode (for example AUTO_LOITER after a landing), the pilot or operator puts it in Offboard while disarmed. **Our code never changes modes or arms.**
+7. **Pilot arms.** Our node takes off at once: 1 m/s climb to 1.0 m. Then:
+   - `hover`: holds 10 s and lands on the mark.
+   - `first_leg`: flies slowly (0.4 m/s) to the first maze gap, holds 5 s and lands there.
+   - `course`: flies the full Gate B route and lands on the pad.
+
+   PX4 auto-disarms after touchdown. The log shows the mission state: `idle → takeoff → course → landing → landed → done`.
+8. **Abort, any of these:**
+   - pilot RC takeover (mode switch);
+   - dashboard Hold or Land;
+   - dashboard KILL (motors off);
+   - `bash stop.sh`. The interface then holds position after 0.5 s.
+
+   After a takeover our node never re-engages in that run.
+9. **Stop:** `bash stop.sh`. It closes our node and the recorder; the dashboard is untouched. Bags go to `~/team_ws/bags/cv1_<preset>_<time>/`.
+
+Fly in order: hover, then first_leg, then course. Move on only after a clean flight. After the first flights, fit the real airframe lag before going faster:
+`python3 repo/path_following/tools/fit_lag.py <bag> --states course`
+
+## What our node will do on its own
+
+| Situation | Behaviour |
+|---|---|
+| `/skybeta/state` older than 0.5 s, or `px4_link` false | No authority: in flight it aborts and goes silent |
+| Pose older than 0.25 s (measured from the VIO timestamp) | Zero velocity: PX4 brakes and holds |
+| Pose jump (VIO relocalisation) | Aborts. While Offboard lasts it descends in place; once Offboard ends it stops commanding for good |
+| A dashboard pose setpoint, or interface Hold | Yields: publishes nothing from then on |
+| Planner fails | Publishes nothing: arming gives no autonomy |
+
+## Not verified on hardware
+
+- Lag 0.66/0.18 comes from Gazebo's x500, not the Sky Beta.
+- In Gazebo this ran with the organizers' stock interface standing in for the dashboard's interface, not with the USB MAVLink link.
+- Offboard entry depends on the dashboard's selector or the pilot.
