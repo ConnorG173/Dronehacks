@@ -30,7 +30,7 @@ fi
 if [[ ! -f "$REPO/sim/gz/models/skybeta_frame/model.sdf" ]]; then
   python3 "$REPO/sim/tools/make_skybeta_frame.py" --px4 "$PX4_DIR"
 fi
-E="SIM_ID=$SIM_ID"
+E="SIM_ID=$SIM_ID VIO_IMU=${VIO_IMU:-0}"
 tmux new-session -d -s "$TMUX_SESSION" -n gz "$E bash $S/gz.sh; bash"
 sleep 8
 tmux new-window -t "$TMUX_SESSION" -n px4 "$E bash $S/px4.sh; bash"
@@ -43,5 +43,10 @@ tmux new-window -t "$TMUX_SESSION" -n ekfreset "until $E bash $REPO/sim/tools/px
 tmux new-window -t "$TMUX_SESSION" -n rc "python3 $REPO/sim/rc.py --sim $SIM_ID; bash"
 tmux new-window -t "$TMUX_SESSION" -n bridge "$E bash $S/bridge.sh; bash"
 tmux new-window -t "$TMUX_SESSION" -n stack "$E bash $S/stack.sh; bash"
+tmux new-window -t "$TMUX_SESSION" -n viz "$E COURSE=${COURSE:-planner/config/course_v3_gateb.yaml} bash $S/viz.sh; bash"
+# Record the 3D view for Foxglove playback when ~/recordings/ENABLE_sim<N> exists (touch it to turn on).
+if [[ -f "$HOME/recordings/ENABLE_sim$SIM_ID" ]]; then
+  tmux new-window -t "$TMUX_SESSION" -n rec "sleep 20; $E bash $S/record_viz.sh; bash"
+fi
 tmux new-window -t "$TMUX_SESSION" -n foxglove "source /opt/ros/humble/setup.bash && ROS_DOMAIN_ID=$ROS_DOMAIN_ID FASTRTPS_DEFAULT_PROFILES_FILE=$FASTRTPS_DEFAULT_PROFILES_FILE ros2 launch foxglove_bridge foxglove_bridge_launch.xml port:=$FOXGLOVE_PORT; bash"
 echo "sim $SIM_ID starting: tmux attach -t $TMUX_SESSION   (ROS_DOMAIN_ID=$ROS_DOMAIN_ID, foxglove :$FOXGLOVE_PORT, MAVLink :$MAV_PORT)"

@@ -1,0 +1,120 @@
+{
+  "configById": {
+    "3D!overview": {
+      "cameraState": {
+        "distance": 10.5,
+        "perspective": true,
+        "phi": 48,
+        "target": [0, 0, 0],
+        "targetOffset": [0, 0, 0],
+        "targetOrientation": [0, 0, 0, 1],
+        "thetaOffset": 35,
+        "fovy": 45,
+        "near": 0.05,
+        "far": 5000
+      },
+      "followMode": "follow-none",
+      "followTfFrame": "world",
+      "scene": {
+        "enableStats": false,
+        "backgroundColor": "#14161b",
+        "transforms": { "showLabel": false, "visible": false }
+      },
+      "transforms": {},
+      "topics": {
+        "/viz/course": { "visible": true },
+        "/viz/checkpoints": { "visible": true },
+        "/viz/drone": { "visible": true },
+        "/viz/trails": { "visible": true },
+        "/team/plan/path": { "visible": true, "lineWidth": 0.04, "gradient": ["#ffffffcc", "#ffffffcc"] }
+      },
+      "layers": {
+        "grid": {
+          "visible": true,
+          "frameId": "course",
+          "size": 8,
+          "divisions": 16,
+          "lineWidth": 1,
+          "color": "#ffffff1f",
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0],
+          "order": 1,
+          "layerId": "foxglove.Grid"
+        }
+      },
+      "publish": { "type": "point", "poseTopic": "/move_base_simple/goal", "pointTopic": "/clicked_point", "poseEstimateTopic": "/initialpose" },
+      "imageMode": {}
+    },
+    "3D!chase": {
+      "cameraState": {
+        "distance": 2.6,
+        "perspective": true,
+        "phi": 62,
+        "target": [0, 0, 0],
+        "targetOffset": [0, 0, 0],
+        "targetOrientation": [0, 0, 0, 1],
+        "thetaOffset": 180,
+        "fovy": 60,
+        "near": 0.02,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "followTfFrame": "drone_gt",
+      "scene": {
+        "enableStats": false,
+        "backgroundColor": "#14161b",
+        "transforms": { "showLabel": false, "visible": false }
+      },
+      "transforms": {},
+      "topics": {
+        "/viz/course": { "visible": true },
+        "/viz/checkpoints": { "visible": true },
+        "/viz/drone": { "visible": true },
+        "/viz/trails": { "visible": true },
+        "/team/plan/path": { "visible": true, "lineWidth": 0.03, "gradient": ["#ffffffcc", "#ffffffcc"] }
+      },
+      "layers": {},
+      "publish": { "type": "point", "poseTopic": "/move_base_simple/goal", "pointTopic": "/clicked_point", "poseEstimateTopic": "/initialpose" },
+      "imageMode": {}
+    },
+    "Image!camera": {
+      "cameraState": {
+        "distance": 20, "perspective": true, "phi": 60, "target": [0, 0, 0], "targetOffset": [0, 0, 0],
+        "targetOrientation": [0, 0, 0, 1], "thetaOffset": 45, "fovy": 45, "near": 0.5, "far": 5000
+      },
+      "followMode": "follow-pose",
+      "scene": {},
+      "transforms": {},
+      "topics": {},
+      "layers": {},
+      "publish": { "type": "point", "poseTopic": "/move_base_simple/goal", "pointTopic": "/clicked_point", "poseEstimateTopic": "/initialpose" },
+      "imageMode": { "imageTopic": "/oak/left/image_mono" }
+    },
+    "RawMessages!state": {
+      "diffEnabled": false,
+      "diffMethod": "custom",
+      "diffTopicPath": "",
+      "showFullMessageForDiff": false,
+      "topicPath": "/team/mission/state"
+    }
+  },
+  "globalVariables": {},
+  "userNodes": {},
+  "playbackConfig": { "speed": 1 },
+  "layout": {
+    "first": "3D!overview",
+    "second": {
+      "first": "3D!chase",
+      "second": {
+        "first": "Image!camera",
+        "second": "RawMessages!state",
+        "direction": "column",
+        "splitPercentage": 78
+      },
+      "direction": "column",
+      "splitPercentage": 55
+    },
+    "direction": "row",
+    "splitPercentage": 62
+  }
+}
