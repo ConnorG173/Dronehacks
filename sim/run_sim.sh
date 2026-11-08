@@ -30,7 +30,7 @@ fi
 if [[ ! -f "$REPO/sim/gz/models/skybeta_frame/model.sdf" ]]; then
   python3 "$REPO/sim/tools/make_skybeta_frame.py" --px4 "$PX4_DIR"
 fi
-E="SIM_ID=$SIM_ID"
+E="SIM_ID=$SIM_ID VIO_IMU=${VIO_IMU:-0}"
 tmux new-session -d -s "$TMUX_SESSION" -n gz "$E bash $S/gz.sh; bash"
 sleep 8
 tmux new-window -t "$TMUX_SESSION" -n px4 "$E bash $S/px4.sh; bash"
