@@ -74,13 +74,16 @@ class Track:
 
 def anchor_with_gt(vio: Track, gt: Track) -> Track:
     """Raw VIO mapped into the course frame by matching ground truth at the first VIO sample."""
-    t0 = vio.t[0]
+    k0 = int(np.searchsorted(vio.t, gt.t[0]))       # first VIO sample inside the GT time range
+    if k0 >= len(vio.t):
+        k0 = len(vio.t) - 1
+    t0 = vio.t[k0]
     i = int(np.searchsorted(gt.t, t0))
     i = min(max(i, 0), len(gt) - 1)
-    R_gt, R_v = quat_to_R(gt.q[i]), quat_to_R(vio.q[0])
+    R_gt, R_v = quat_to_R(gt.q[i]), quat_to_R(vio.q[k0])
     p_gt, _ = gt.interp([t0])
     R = R_gt @ R_v.T
-    tr = p_gt[0] - R @ vio.p[0]
+    tr = p_gt[0] - R @ vio.p[k0]
     p = (R @ vio.p.T).T + tr
     dyaw = math.atan2(R[1, 0], R[0, 0])
     yaw = wrap(vio.yaw + dyaw)
