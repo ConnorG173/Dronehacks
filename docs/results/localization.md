@@ -63,6 +63,8 @@ Errors are /team/odom_map vs `/sim/ground_truth/odom` (`tools/loc_eval.py`, `too
 | gt05 | per-part (3dedfc0) | mission done | 0.126 / 0.23 (**raw VIO 0.090**) | corr 0.05, 0.11, 0.07, 0.20, 0.15 / raw 0.03, 0.02, 0.04, 0.06, 0.19 | WARN 99.9 % | cuVSLAM clean (1 step of 0.13 m). **The correction was worse than raw VIO**: the matcher landed 12–24 cm off even with the prior on truth. Cause: the nets were modelled as invisible, but the cameras see them, so the matcher slid scans onto interior walls |
 | gt08 | per-part | mission done (47 s; RTF ≈ 0.3, invalid for dynamics) | **0.058 / 0.12** (raw VIO 0.084) | corr 0.04, 0.04, 0.03, 0.11, 0.10 / raw 0.05, 0.05, 0.06, 0.13, 0.10 | OK 93 % / WARN 7 % / ERROR 0; never error > 0.3 m while OK | after the net fix (half-strength net surfaces): 219 of 443 matcher attempts accepted, match error p50 7.9 cm. **The correction beats raw VIO** (RMS −31 %), but the window error (≈ 0.10 m) is not below raw yet. One run, at low RTF |
 
+| loc01 | per-part | **tracker flew on /team/odom_map** (correction on, course_v3 window route, older tracker copy), mission done 47 s, RTF 1.00 | **0.059 / 0.21** (raw VIO 10.9 m: cuVSLAM blew up near the end) | corr 0.04, 0.03, 0.03, 0.08, 0.21 / raw 0.02, 0.02, 0.02, 0.00, **21.4** | OK 93 % / WARN 7 % / ERROR 0; never error > 0.3 m while OK | near the goal, cuVSLAM jumped about 3 m per frame for 8 frames (0.3 s). Absorption kept the course pose continuous; the 0.21 m at the last checkpoint is the drone's real motion during those frames, which the absorption dropped. **Fixed since:** absorption keeps the last good velocity × dt |
+
 The matcher on the gt05 scans (37 dumped scans, prior on truth):
 
 | net model | accepted | match error p50 |
