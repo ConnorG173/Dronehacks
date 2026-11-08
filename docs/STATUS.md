@@ -8,7 +8,7 @@ Strict-clean means 0 touches at the 0.29 m prop reach, the whole drone through e
 |---|---|
 | Course time | Met: 24.8–25.2 s (candidate 2) |
 | Openings 5/5, lands in pad, raw VIO | Met in every finished run |
-| 0 touches at 0.29 m | Not met: 1–2 dips of about 0.15 s, min clearance 0.25 m, always at the chicane channel (0.65, -1.12) |
+| 0 touches at 0.29 m | Not met: 1–2 dips of about 0.15 s, min clearance 0.25 m, always at the chicane channel (0.65, -1.12). Localization error there is 2.6–3.4 cm, so the cause is planning/tracking margin, not localization |
 | 3 clean runs in a row | Not met: 0 |
 
 Candidate 3 (path-following 5d62099) targets that one spot.
@@ -21,12 +21,12 @@ Candidate 3 (path-following 5d62099) targets that one spot.
 - **Deploy profile: `drone-conservative-v1`** (`conservative.launch.py`, Gate B, plan slowed 1.4x, peak ~0.86 m/s).
   Never validated in sim: its only run was during the CPU-overload era.
 - **Fast profile:** `fast.launch.py.draft` carries candidate 3's settings. Freeze it as `drone-fast-v1` only after 3 strict-clean runs in a row.
-- **Localization:** raw cuVSLAM in, with our jump absorption on. Correction is off for the first flights; see docs/sessions/localization.md.
+- **Localization:** raw cuVSLAM in, with our jump absorption on. M1 recommended: correction off, jump absorption and sanity checks on. Correction helps when VIO drifts (gt08: 5.8 vs 8.4 cm) but hurts when VIO is good (loc02: 5.9 vs 2.7 cm). It absorbed a 21 m cuVSLAM blow-up in loc01. See docs/sessions/localization.md.
 - **Procedure:** docs/NET_TEST_PLAN.md (bench, carry, hover, first_leg, course). Deploy with `deploy/deploy_to_drone.sh` (skybeta-12 only).
 - Measure `base_height_on_pad_m` on the real drone first.
 
 ## Where things are
-- Branches (local, **not pushed**): `sim-and-plans` (sim, infra, docs), `path-following` (364442d), `localization`.
+- Branches (local, **not pushed**): `sim-and-plans` (sim, infra, docs), `path-following` (364442d), `localization` (5304c06; its build and checks are in docs/DRONE_RUN.md on that branch).
 - Session guides: docs/sessions/path_following.md and docs/sessions/localization.md (each has a "Drone-ready status" section).
 - Coordinator run scripts: `sim/coordinator/` (repeat runs, IMU A/B, team-path runs, VIO-vs-GT checks).
 - Recordings on the VM: `~/recordings/sim<slot>_<UTC>/*.mcap`. Only runs recorded after fdf3b33 show the 3D view correctly in Foxglove (layout: docs/foxglove_sim_layout.json).
