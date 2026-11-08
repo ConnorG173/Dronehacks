@@ -16,8 +16,8 @@ import sys
 
 import numpy as np
 import rclpy
-from foxglove_msgs.msg import (Color, CubePrimitive, CylinderPrimitive, LinePrimitive, ModelPrimitive,
-                               SceneEntity, SceneUpdate)
+from foxglove_msgs.msg import (Color, CubePrimitive, CylinderPrimitive, LinePrimitive, SceneEntity, SceneUpdate,
+                               TriangleListPrimitive)
 from geometry_msgs.msg import Point, Pose, TransformStamped, Vector3
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
@@ -114,13 +114,20 @@ class Viz(Node):
         return self.get_clock().now().to_msg()
 
     def build_course(self):
+        # Native TriangleListPrimitive with lighting baked into per-vertex colours (renders everywhere; embedded STL
+        # models did not show up in Foxglove).
         up = SceneUpdate()
+        light = np.array([0.35, 0.25, 0.9]); light /= np.linalg.norm(light)
         for i, (name, tris) in enumerate(sorted(load_obj_groups(OBJ).items())):
+            base = np.array((0.30, 0.30, 0.34) if name == "floor" else PALETTE[i % len(PALETTE)])
+            n = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
+            n /= np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-9)
+            shade = 0.45 + 0.55 * np.abs(n @ light)          # two-sided
             e = SceneEntity(); e.frame_id = "course"; e.id = f"course_{name}"; e.frame_locked = True
-            m = ModelPrimitive(); m.pose = pose(); m.scale = Vector3(x=1.0, y=1.0, z=1.0)
-            m.media_type = "model/stl"; m.data = list(stl_bytes(tris)); m.override_color = True
-            m.color = col(0.25, 0.25, 0.28) if name == "floor" else col(*PALETTE[i % len(PALETTE)])
-            e.models.append(m); up.entities.append(e)
+            t = TriangleListPrimitive(); t.pose = pose()
+            t.points = [Point(x=float(v[0]), y=float(v[1]), z=float(v[2])) for tri in tris for v in tri]
+            t.colors = [col(*(base * k)) for k in shade for _ in range(3)]
+            e.triangles.append(t); up.entities.append(e)
         return up
 
     def build_checkpoints(self):
