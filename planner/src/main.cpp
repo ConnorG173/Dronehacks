@@ -179,6 +179,38 @@ static Eigen::MatrixX4d boxPolytope(const Box &b)
     return H;
 }
 
+// Where the route aims inside a checkpoint box: the center if it is free, else the
+// free voxel center nearest to it that lies at least 2 cm inside the box (so the
+// box still overlaps the leg's end polytope by more than polysOverlap's 1 cm).
+// A box drawn across a narrow opening (a window whose inflated edges cover the
+// box center) is then still usable. Returns false if no such point is free.
+static bool checkpointTarget(const voxel_map::VoxelMap &m, const Box &b, Vector3d &out)
+{
+    if (!m.query(b.c))
+    {
+        out = b.c;
+        return true;
+    }
+    const double inset = 0.02;
+    const Eigen::Vector3i lo = m.posD2I(b.c - b.h), hi = m.posD2I(b.c + b.h);
+    double best = INFINITY;
+    for (int i = lo(0); i <= hi(0); i++)
+        for (int j = lo(1); j <= hi(1); j++)
+            for (int k = lo(2); k <= hi(2); k++)
+            {
+                const Eigen::Vector3i id(i, j, k);
+                const Vector3d p = m.posI2D(id);
+                if (((p - b.c).cwiseAbs() - b.h).maxCoeff() > -inset || m.query(id))
+                    continue;
+                if ((p - b.c).norm() < best)
+                {
+                    best = (p - b.c).norm();
+                    out = p;
+                }
+            }
+    return std::isfinite(best);
+}
+
 // True if the intersection contains a ball of radius 1 cm. Rows are normalized
 // first (as GCOPTER::setup does) so the margin is in metres; the 0.01 is the
 // same margin sfc_gen::shortCut uses.
@@ -306,13 +338,23 @@ int main(int argc, char **argv)
     }
     voxelMap.dilate(std::ceil(dilateRadius / voxelMap.getScale()));
 
-    // --- Waypoints: hover above the pad, checkpoint centers, goal ---
+    // --- Waypoints: hover above the pad, checkpoint targets (see checkpointTarget), goal ---
     std::vector<Vector3d> wps{startPos + Vector3d(0.0, 0.0, hoverHeight)};
     std::vector<std::string> names{"start hover point"};
     for (size_t k = 0; k < cps.size(); k++)
     {
-        wps.push_back(cps[k].c);
-        names.push_back("checkpoint " + std::to_string(k + 1) + " center");
+        const std::string name = "checkpoint " + std::to_string(k + 1);
+        Vector3d target;
+        if (!checkpointTarget(voxelMap, cps[k], target))
+            fail(name + " box " + fmt(cps[k].c) + " +/- " + fmt(cps[k].h) +
+                 " has no free point: all of it is inside an obstacle, its DilateRadius margin, "
+                 "or outside MapBound (move or enlarge the box, or lower DilateRadius)");
+        if (target != cps[k].c)
+            std::printf("NOTE %s center %s is inside the DilateRadius margin; aiming at the nearest free "
+                        "point in the box, %s (%.3f m away)\n",
+                        name.c_str(), fmt(cps[k].c).c_str(), fmt(target).c_str(), (target - cps[k].c).norm());
+        wps.push_back(target);
+        names.push_back(name + " target");
     }
     wps.push_back(goal);
     names.push_back("goal");

@@ -1,0 +1,599 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Course Planner</title>
+<style>
+  :root {
+    --bg: #0f1216; --panel: #171b21; --line: #2a3039; --text: #e6e9ee; --muted: #8b95a3;
+    --accent: #4fa3ff; --start: #3ccf7a; --cp: #ffae3d; --goal: #ff5a5f; --err: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 13px/1.4 system-ui, -apple-system, Segoe UI, sans-serif; }
+  #app { display: flex; height: 100%; }
+  #side { width: 380px; flex: none; overflow-y: auto; background: var(--panel);
+    border-right: 1px solid var(--line); padding: 12px 14px 40px; }
+  #view { flex: 1; position: relative; min-width: 0; }
+  #view canvas { display: block; }
+  h1 { font-size: 15px; margin: 2px 0 10px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+    margin: 18px 0 8px; border-top: 1px solid var(--line); padding-top: 12px; }
+  label { color: var(--muted); }
+  input[type=number], input[type=text], select {
+    background: #0f1216; color: var(--text); border: 1px solid var(--line); border-radius: 4px;
+    padding: 3px 5px; font: inherit; width: 100%; min-width: 0; }
+  input[type=number] { font-variant-numeric: tabular-nums; }
+  button { background: #222831; color: var(--text); border: 1px solid var(--line); border-radius: 5px;
+    padding: 5px 9px; font: inherit; cursor: pointer; }
+  button:hover { border-color: #46505d; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #06121f; font-weight: 600; }
+  button.on { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button:disabled { opacity: .45; cursor: default; }
+  .row { display: flex; gap: 6px; align-items: center; margin: 5px 0; }
+  .row > * { flex: 1; }
+  .row > label { flex: 0 0 120px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+  .muted { color: var(--muted); }
+  .wp { border: 1px solid var(--line); border-radius: 6px; padding: 6px 7px; margin: 6px 0; }
+  .wp .head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .wp .head b { flex: 1; }
+  .wp .head button { padding: 1px 6px; }
+  .tag { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+  .small { font-size: 11px; }
+  pre { background: #0b0e11; border: 1px solid var(--line); border-radius: 5px; padding: 7px;
+    overflow-x: auto; font-size: 11px; white-space: pre; max-height: 320px; }
+  #status { margin: 8px 0; min-height: 18px; }
+  #status.err { color: var(--err); }
+  details summary { cursor: pointer; color: var(--muted); margin: 6px 0; }
+  a { color: var(--accent); }
+  #hud { position: absolute; left: 10px; top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+  #hint { position: absolute; left: 50%; transform: translateX(-50%); bottom: 14px; background: #000a;
+    padding: 6px 12px; border-radius: 6px; pointer-events: none; display: none; }
+  #legend { position: absolute; right: 10px; top: 10px; background: #000a; padding: 6px 9px;
+    border-radius: 6px; font-size: 11px; display: none; }
+  #legend .bar { width: 140px; height: 8px; border-radius: 3px;
+    background: linear-gradient(90deg, hsl(230 90% 55%), hsl(120 90% 45%), hsl(0 90% 55%)); }
+  .lbl { color: #fff; font: 600 12px system-ui; padding: 1px 5px; border-radius: 4px;
+    background: #000b; pointer-events: none; }
+  #play { position: absolute; left: 10px; right: 10px; bottom: 50px; display: none; gap: 8px;
+    align-items: center; background: #000a; padding: 6px 10px; border-radius: 6px; }
+  #play input[type=range] { flex: 1; }
+  #play span { font-variant-numeric: tabular-nums; min-width: 230px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="side">
+    <h1>Course path planner</h1>
+    <div class="muted small">Upload a course CAD file, place start, checkpoints and goal, plan with
+      gcopter_planner. Map frame: metres, z up.</div>
+
+    <h2>1 · Course</h2>
+    <div class="row">
+      <input type="file" id="file" accept=".step,.stp,.stl,.obj,.ply">
+    </div>
+    <div class="row"><button id="example">Load course v3 + its mission</button></div>
+    <div class="row"><label>CAD units</label>
+      <select id="units">
+        <option value="0.001">millimetres</option><option value="0.01">centimetres</option>
+        <option value="0.0254">inches</option><option value="0.3048">feet</option><option value="1">metres</option>
+      </select></div>
+    <div class="row"><label>CAD up axis</label>
+      <select id="up"><option value="z">+Z up</option><option value="y">+Y up</option></select></div>
+    <div class="row"><label>Rotate (deg)</label><input type="number" id="yaw" value="0" step="90"></div>
+    <div class="row"><label>Translate (m)</label>
+      <div class="grid3"><input type="number" id="tx" value="0" step="0.1"><input type="number" id="ty" value="0" step="0.1"><input type="number" id="tz" value="0" step="0.1"></div></div>
+    <div id="courseInfo" class="muted small"></div>
+
+    <h2>2 · Mission</h2>
+    <div class="row">
+      <button id="pickStart" data-mode="start">Place start</button>
+      <button id="pickCp" data-mode="cp">Add checkpoint</button>
+      <button id="pickGoal" data-mode="goal">Place goal</button>
+    </div>
+    <div class="muted small">Pick a mode, then click in the view. The start goes on the ground (the pad),
+      checkpoints at Click height, the goal at Goal height above the ground.</div>
+    <div class="row"><label>Ground z (m)</label><input type="number" id="groundZ" value="0" step="0.05"></div>
+    <div class="row"><label>Click height (m)</label><input type="number" id="pickZ" value="1.0" step="0.05"></div>
+    <div class="row"><label>Start height (m)</label><input type="number" id="hover" value="0.5" step="0.05"></div>
+    <div class="row"><label>Goal height (m)</label><input type="number" id="goalH" value="0.5" step="0.05"></div>
+    <div class="muted small">The path starts at rest Start height above the pad (the flight code takes off to
+      it) and ends at rest Goal height above the landing spot (the flight code lands from there).</div>
+    <div class="row"><label>Start heading (deg)</label><input type="number" id="heading" value="0" step="15"></div>
+    <div class="muted small">Heading is the drone's yaw on the pad, CCW from map +x (the arrow).</div>
+    <div id="wps"></div>
+
+    <h2>3 · Plan</h2>
+    <details>
+      <summary>Planner settings</summary>
+      <div class="row"><label>Voxel (m)</label><input type="number" id="voxel" value="0.1" step="0.05"></div>
+      <div class="row"><label>Inflate walls (m)</label><input type="number" id="dilate" value="0.3" step="0.05"></div>
+      <div class="row"><label>Sample spacing (m)</label><input type="number" id="spacing" value="0.04" step="0.01"></div>
+      <div class="row"><label>Add floor at z=0</label><input type="checkbox" id="addFloor" style="flex:0"></div>
+      <div class="row"><label>Max speed (m/s)</label><input type="number" id="maxVel" value="4" step="0.5"></div>
+      <div class="row"><label>RRT time / leg (s)</label><input type="number" id="timeoutRRT" value="0.5" step="0.1"></div>
+      <div class="row"><label>Attempts</label><input type="number" id="tries" value="5" step="1" min="1" max="20"></div>
+      <div class="row"><label>Map bound</label><button id="autoBound">Fit to course</button></div>
+      <div class="grid3" id="boundIn"></div>
+      <div class="muted small" style="margin-top:4px">Outside the bound counts as a wall. Vehicle
+        parameters come from config/course_v3.yaml (placeholders).</div>
+    </details>
+    <div class="row"><button id="plan" class="primary" disabled>Plan path</button></div>
+    <div id="status"></div>
+    <div id="result"></div>
+
+    <h2>View</h2>
+    <div class="row"><label>Cut away above z</label><input type="range" id="clip" min="0" max="1" step="0.01" value="1"></div>
+    <div class="row"><label>X-ray walls</label><input type="checkbox" id="xray" style="flex:0"></div>
+    <div class="row"><label>Show map bound</label><input type="checkbox" id="showBound" style="flex:0" checked></div>
+  </div>
+
+  <div id="view">
+    <div id="hud"><button id="topView">Top view</button><button id="isoView">3D view</button></div>
+    <div id="legend"><div>speed 0 → <span id="vmax"></span> m/s</div><div class="bar"></div></div>
+    <div id="play"><button id="playBtn">▶</button><input type="range" id="tSlider" min="0" max="1" step="0.001" value="0"><span id="tInfo"></span></div>
+    <div id="hint"></div>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
+import { Line2 } from "three/addons/lines/Line2.js";
+import { LineMaterial } from "three/addons/lines/LineMaterial.js";
+import { LineGeometry } from "three/addons/lines/LineGeometry.js";
+
+const $ = id => document.getElementById(id);
+const num = id => parseFloat($(id).value);
+const CP_HALF = [0.15, 0.15, 0.25];
+
+// ---------- state ----------
+const S = {
+  course: null,                 // {id, name, triangles}
+  start: null, goal: null,      // [x, y, z]
+  checkpoints: [],              // [cx, cy, cz, hx, hy, hz]
+  bound: [-5, 5, -5, 5, 0, 3],
+  meshBox: null,                // THREE.Box3 of the map-frame course
+  mode: null,
+  path: null, run: null,
+};
+
+// ---------- three.js scene (map frame, z up) ----------
+const view = $("view");
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.localClippingEnabled = true;
+renderer.setClearColor(0x0f1216);
+view.appendChild(renderer.domElement);
+const labels = new CSS2DRenderer();
+labels.domElement.style.cssText = "position:absolute;top:0;left:0;pointer-events:none";
+view.appendChild(labels.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 500);
+camera.up.set(0, 0, 1);
+camera.position.set(-8, -10, 8);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x334455, 1.6));
+const sun = new THREE.DirectionalLight(0xffffff, 1.4);
+sun.position.set(5, -8, 12);
+scene.add(sun);
+
+const grid = new THREE.GridHelper(20, 20, 0x3a4350, 0x252b33);
+grid.rotation.x = Math.PI / 2;
+scene.add(grid);
+const axes = new THREE.AxesHelper(1);  // x red, y green, z blue
+scene.add(axes);
+
+const clipPlane = new THREE.Plane(new THREE.Vector3(0, 0, -1), 100);
+const courseMat = new THREE.MeshStandardMaterial({ color: 0x9aa5b4, roughness: 0.85, metalness: 0,
+  side: THREE.DoubleSide, clippingPlanes: [clipPlane], polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
+const edgeMat = new THREE.LineBasicMaterial({ color: 0x2b3038, clippingPlanes: [clipPlane] });
+let courseGroup = null;
+
+const markers = new THREE.Group(); scene.add(markers);
+const pathGroup = new THREE.Group(); scene.add(pathGroup);
+const boundBox = new THREE.Box3Helper(new THREE.Box3(), 0x5c6675); scene.add(boundBox);
+
+const pickPlaneMat = new THREE.MeshBasicMaterial({ color: 0x4fa3ff, transparent: true, opacity: 0.12,
+  side: THREE.DoubleSide, depthWrite: false });
+const pickPlane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), pickPlaneMat);
+pickPlane.visible = false; scene.add(pickPlane);
+
+const drone = new THREE.Mesh(new THREE.SphereGeometry(0.09, 20, 14), new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x444444 }));
+drone.visible = false; scene.add(drone);
+
+function resize() {
+  const w = view.clientWidth, h = view.clientHeight;
+  renderer.setSize(w, h); labels.setSize(w, h);
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+  pathGroup.traverse(o => o.material?.resolution?.set(w, h));
+}
+window.addEventListener("resize", resize);
+
+// ---------- status ----------
+function status(msg, err = false) { $("status").textContent = msg; $("status").className = err ? "err" : ""; }
+async function api(path, opts = {}) {
+  const r = await fetch(path, opts);
+  if (!r.ok) {
+    let msg = r.statusText;
+    try { msg = (await r.json()).error; } catch {}
+    throw new Error(msg);
+  }
+  return r;
+}
+
+// ---------- course ----------
+function transform() {
+  return { scale: num("units"), up: $("up").value, yaw: num("yaw") || 0,
+           translate: [num("tx") || 0, num("ty") || 0, num("tz") || 0] };
+}
+
+function setUnits(scale) {
+  const opts = [...$("units").options];
+  const best = opts.reduce((a, o) => Math.abs(Math.log(o.value / scale)) < Math.abs(Math.log(a.value / scale)) ? o : a);
+  $("units").value = best.value;
+}
+
+async function onCourse(info, mission) {
+  S.course = info;
+  if (mission) applyMission(mission); else setUnits(info.scaleGuess);
+  await loadMesh(!mission);
+  $("plan").disabled = false;
+}
+
+async function loadMesh(fitBound) {
+  if (!S.course) return;
+  status("Loading mesh…");
+  const buf = await (await api("/api/mesh", { method: "POST", body: JSON.stringify({ id: S.course.id, transform: transform() }) })).arrayBuffer();
+  const [nV, nF] = new Uint32Array(buf, 0, 2);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(buf, 8, nV * 3), 3));
+  geo.setIndex(new THREE.BufferAttribute(new Uint32Array(buf, 8 + nV * 12, nF * 3), 1));
+  const flat = geo.toNonIndexed(); flat.computeVertexNormals();  // CAD faces: flat shading
+  if (courseGroup) { scene.remove(courseGroup); courseGroup.traverse(o => o.geometry?.dispose()); }
+  courseGroup = new THREE.Group();
+  courseGroup.add(new THREE.Mesh(flat, courseMat));
+  courseGroup.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo, 25), edgeMat));
+  scene.add(courseGroup);
+
+  geo.computeBoundingBox();
+  S.meshBox = geo.boundingBox.clone();
+  const b = S.meshBox;
+  $("courseInfo").textContent = `${S.course.name}: ${S.course.triangles} triangles. Map-frame size `
+    + `${(b.max.x - b.min.x).toFixed(2)} × ${(b.max.y - b.min.y).toFixed(2)} × ${(b.max.z - b.min.z).toFixed(2)} m, `
+    + `x ${b.min.x.toFixed(2)}…${b.max.x.toFixed(2)}, y ${b.min.y.toFixed(2)}…${b.max.y.toFixed(2)}, z ${b.min.z.toFixed(2)}…${b.max.z.toFixed(2)}`;
+  $("clip").min = b.min.z.toFixed(2); $("clip").max = (b.max.z + 0.01).toFixed(2);
+  $("clip").value = (b.min.z + 0.9 * (b.max.z - b.min.z)).toFixed(2);  // hides a roof by default
+  if (fitBound) autoBound();
+  const size = b.getSize(new THREE.Vector3()).length();
+  grid.scale.setScalar(Math.max(1, size / 14));
+  setClip(); isoView(); clearPath(); redraw();
+  status("Course loaded. Place the start, checkpoints and goal.");
+}
+
+function autoBound() {
+  if (!S.meshBox) return;
+  const b = S.meshBox, m = 0.15, r = v => Math.round(v * 20) / 20;
+  S.bound = [r(b.min.x - m), r(b.max.x + m), r(b.min.y - m), r(b.max.y + m), r(b.min.z), r(b.max.z + m)];  // zmin at the floor (rounded), not below it
+  renderBoundInputs(); redraw();
+}
+
+function renderBoundInputs() {
+  const names = ["xmin", "xmax", "ymin", "ymax", "zmin", "zmax"];
+  $("boundIn").innerHTML = "";
+  S.bound.forEach((v, i) => {
+    const inp = document.createElement("input");
+    inp.type = "number"; inp.step = "0.05"; inp.value = v; inp.title = names[i];
+    inp.onchange = () => { S.bound[i] = parseFloat(inp.value); redraw(); };
+    $("boundIn").appendChild(inp);
+  });
+}
+
+$("file").onchange = async () => {
+  const f = $("file").files[0];
+  if (!f) return;
+  status(`Uploading and converting ${f.name}… (STEP takes a few seconds)`);
+  try {
+    const info = await (await api("/api/upload?name=" + encodeURIComponent(f.name), { method: "POST", body: f })).json();
+    S.start = S.goal = null; S.checkpoints = [];
+    await onCourse(info, null);
+  } catch (e) { status("Upload failed: " + e.message, true); }
+};
+
+$("example").onclick = async () => {
+  status("Loading dronehacks-course-v3.step…");
+  try {
+    const info = await (await api("/api/example")).json();
+    await onCourse(info, info.mission);
+  } catch (e) { status("Failed: " + e.message, true); }
+};
+
+for (const id of ["units", "up", "yaw", "tx", "ty", "tz"])
+  $(id).onchange = () => loadMesh(true).catch(e => status(e.message, true));
+
+function applyMission(m) {
+  setUnits(m.transform.scale); $("up").value = m.transform.up; $("yaw").value = m.transform.yaw;
+  [$("tx").value, $("ty").value, $("tz").value] = m.transform.translate;
+  $("spacing").value = m.map.spacing; $("addFloor").checked = m.map.addFloor;
+  $("voxel").value = m.map.voxel; $("dilate").value = m.map.dilate;
+  S.bound = m.map.bound.slice(); renderBoundInputs();
+  S.start = m.start.slice(); S.goal = m.goal.slice(); S.checkpoints = m.checkpoints.map(c => c.slice());
+  $("heading").value = m.heading; $("hover").value = m.hover; $("groundZ").value = m.start[2];
+  $("maxVel").value = m.planner.maxVel; $("timeoutRRT").value = m.planner.timeoutRRT; $("tries").value = m.planner.tries;
+  $("goalH").value = +(m.goal[2] - m.start[2]).toFixed(3);
+}
+
+// ---------- view controls ----------
+function setClip() { clipPlane.constant = parseFloat($("clip").value); }
+$("clip").oninput = setClip;
+$("xray").onchange = () => {
+  const x = $("xray").checked;
+  courseMat.transparent = x; courseMat.opacity = x ? 0.25 : 1; courseMat.depthWrite = !x; courseMat.needsUpdate = true;
+};
+$("showBound").onchange = redraw;
+
+function center() { return S.meshBox ? S.meshBox.getCenter(new THREE.Vector3()) : new THREE.Vector3(); }
+function extent() { return S.meshBox ? S.meshBox.getSize(new THREE.Vector3()).length() : 10; }
+function isoView() {
+  const c = center(), e = extent();
+  controls.target.copy(c); camera.position.set(c.x - 0.55 * e, c.y - 0.75 * e, c.z + 0.7 * e);
+}
+function topView() {
+  const c = center(), e = extent();
+  controls.target.copy(c); camera.position.set(c.x, c.y - 0.001 * e, c.z + 1.3 * e);
+}
+$("isoView").onclick = isoView; $("topView").onclick = topView;
+
+// ---------- picking ----------
+const modeHints = { start: "Click to place the START (on the ground at Ground z)",
+  cp: "Click to add a CHECKPOINT at Click height (Esc to stop)",
+  goal: "Click to place the GOAL (Goal height above Ground z; the drone lands from there)" };
+function setMode(m) {
+  S.mode = S.mode === m ? null : m;
+  for (const b of document.querySelectorAll("[data-mode]")) b.classList.toggle("on", b.dataset.mode === S.mode);
+  $("hint").style.display = S.mode ? "block" : "none";
+  $("hint").textContent = modeHints[S.mode] || "";
+  updatePickPlane();
+}
+for (const b of document.querySelectorAll("[data-mode]")) b.onclick = () => setMode(b.dataset.mode);
+window.addEventListener("keydown", e => { if (e.key === "Escape" && S.mode) setMode(S.mode); });
+function pickHeight() {
+  if (S.mode === "start") return num("groundZ");
+  if (S.mode === "goal") return num("groundZ") + num("goalH");
+  return num("pickZ");
+}
+function updatePickPlane() {
+  pickPlane.visible = !!S.mode;
+  if (!S.mode) return;
+  const [x0, x1, y0, y1] = S.bound;
+  pickPlane.scale.set(x1 - x0, y1 - y0, 1);
+  pickPlane.position.set((x0 + x1) / 2, (y0 + y1) / 2, pickHeight() + 0.002);
+}
+$("pickZ").oninput = $("groundZ").oninput = $("goalH").oninput = updatePickPlane;
+
+let down = null;
+renderer.domElement.addEventListener("pointerdown", e => { down = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener("pointerup", e => {
+  if (!S.mode || !down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5) return;
+  const r = renderer.domElement.getBoundingClientRect();
+  const ndc = new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  const ray = new THREE.Raycaster(); ray.setFromCamera(ndc, camera);
+  const hit = ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 0, 1), -pickHeight()), new THREE.Vector3());
+  if (!hit) return;
+  const p = [hit.x, hit.y, hit.z].map(v => Math.round(v * 1000) / 1000);
+  if (S.mode === "start") { S.start = p; setMode("start"); }
+  else if (S.mode === "goal") { S.goal = p; setMode("goal"); }
+  else S.checkpoints.push([...p, ...CP_HALF]);
+  clearPath(); redraw();
+});
+
+// ---------- waypoint list + markers ----------
+function numInputs(arr, from, to, onchange) {
+  const g = document.createElement("div"); g.className = "grid3";
+  for (let i = from; i < to; i++) {
+    const inp = document.createElement("input");
+    inp.type = "number"; inp.step = "0.05"; inp.value = arr[i];
+    inp.onchange = () => { arr[i] = parseFloat(inp.value); onchange(); };
+    g.appendChild(inp);
+  }
+  return g;
+}
+
+function wpCard(title, color, arr, extra) {
+  const d = document.createElement("div"); d.className = "wp";
+  const h = document.createElement("div"); h.className = "head";
+  h.innerHTML = `<span class="tag" style="background:${color}"></span><b>${title}</b>`;
+  for (const [txt, fn] of extra.buttons || []) {
+    const b = document.createElement("button"); b.textContent = txt; b.onclick = fn; h.appendChild(b);
+  }
+  d.appendChild(h);
+  const changed = () => { clearPath(); redraw(); };
+  d.appendChild(numInputs(arr, 0, 3, changed));
+  if (extra.half) {
+    const l = document.createElement("div"); l.className = "muted small"; l.style.margin = "4px 0 2px";
+    l.textContent = "box half-size x y z (m): the path must pass through this box";
+    d.appendChild(l); d.appendChild(numInputs(arr, 3, 6, changed));
+  }
+  return d;
+}
+
+function renderList() {
+  const w = $("wps"); w.innerHTML = "";
+  if (S.start) w.appendChild(wpCard("Start (pad, on the ground)", "var(--start)", S.start, {}));
+  S.checkpoints.forEach((cp, i) => {
+    const mv = (k) => { const j = i + k; if (j < 0 || j >= S.checkpoints.length) return;
+      [S.checkpoints[i], S.checkpoints[j]] = [S.checkpoints[j], S.checkpoints[i]]; clearPath(); redraw(); };
+    w.appendChild(wpCard(`Checkpoint ${i + 1}`, "var(--cp)", cp, { half: true, buttons: [
+      ["↑", () => mv(-1)], ["↓", () => mv(1)],
+      ["✕", () => { S.checkpoints.splice(i, 1); clearPath(); redraw(); }]] }));
+  });
+  if (S.goal) w.appendChild(wpCard("Goal (end at rest, then land)", "var(--goal)", S.goal, {}));
+  if (!S.start && !S.goal && !S.checkpoints.length)
+    w.innerHTML = '<div class="muted small" style="margin-top:8px">No points yet.</div>';
+}
+
+function label(text, pos) {
+  const el = document.createElement("div"); el.className = "lbl"; el.textContent = text;
+  const o = new CSS2DObject(el); o.position.copy(pos); return o;
+}
+
+function clearGroup(g) {
+  g.traverse(o => { o.geometry?.dispose(); if (o.element) o.element.remove(); });
+  g.clear();
+}
+
+function redraw() {
+  renderList();
+  clearGroup(markers);
+  const V = (a) => new THREE.Vector3(a[0], a[1], a[2]);
+  const hover = num("hover");
+  if (S.start) {
+    const s = V(S.start);
+    const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.02, 32), new THREE.MeshStandardMaterial({ color: 0x3ccf7a }));
+    pad.rotation.x = Math.PI / 2; pad.position.copy(s).add(new THREE.Vector3(0, 0, 0.01)); markers.add(pad);
+    const top = s.clone().add(new THREE.Vector3(0, 0, hover));
+    const stem = new THREE.Line(new THREE.BufferGeometry().setFromPoints([s, top]),
+      new THREE.LineDashedMaterial({ color: 0x3ccf7a, dashSize: 0.08, gapSize: 0.05 }));
+    stem.computeLineDistances(); markers.add(stem);
+    const h = num("heading") * Math.PI / 180;
+    markers.add(new THREE.ArrowHelper(new THREE.Vector3(Math.cos(h), Math.sin(h), 0), top, 0.6, 0x3ccf7a, 0.18, 0.1));
+    markers.add(label("S", s.clone().add(new THREE.Vector3(0, 0, 0.25))));
+  }
+  S.checkpoints.forEach((c, i) => {
+    const geo = new THREE.BoxGeometry(2 * c[3], 2 * c[4], 2 * c[5]);
+    const box = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0xffae3d, transparent: true, opacity: 0.22, depthWrite: false }));
+    box.position.copy(V(c)); markers.add(box);
+    const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: 0xffae3d }));
+    edges.position.copy(V(c)); markers.add(edges);
+    markers.add(label(String(i + 1), V(c).add(new THREE.Vector3(0, 0, c[5] + 0.15))));
+  });
+  if (S.goal) {
+    const g = new THREE.Mesh(new THREE.SphereGeometry(0.12, 24, 16), new THREE.MeshStandardMaterial({ color: 0xff5a5f }));
+    g.position.copy(V(S.goal)); markers.add(g);
+    markers.add(label("G", V(S.goal).add(new THREE.Vector3(0, 0, 0.25))));
+  }
+  const [x0, x1, y0, y1, z0, z1] = S.bound;
+  boundBox.box.set(new THREE.Vector3(x0, y0, z0), new THREE.Vector3(x1, y1, z1));
+  boundBox.visible = $("showBound").checked && !!S.course;
+  updatePickPlane();
+}
+$("hover").oninput = $("heading").oninput = redraw;
+
+// ---------- planning ----------
+function clearPath() {
+  clearGroup(pathGroup); S.path = null; drone.visible = false;
+  $("legend").style.display = $("play").style.display = "none";
+  $("result").innerHTML = "";
+}
+
+$("autoBound").onclick = autoBound;
+
+$("plan").onclick = async () => {
+  if (!S.start || !S.goal) return status("Place a start and a goal first.", true);
+  const req = {
+    id: S.course.id, transform: transform(),
+    map: { spacing: num("spacing"), addFloor: $("addFloor").checked, voxel: num("voxel"), dilate: num("dilate"), bound: S.bound },
+    start: S.start, heading: num("heading"), hover: num("hover"), checkpoints: S.checkpoints, goal: S.goal,
+    planner: { maxVel: num("maxVel"), timeoutRRT: num("timeoutRRT"), tries: num("tries") },
+  };
+  clearPath();
+  $("plan").disabled = true;
+  status(`Building map and planning (up to ${req.planner.tries} attempts)…`);
+  try {
+    const res = await (await api("/api/plan", { method: "POST", body: JSON.stringify(req) })).json();
+    showResult(res);
+  } catch (e) { status("Planning request failed: " + e.message, true); }
+  $("plan").disabled = false;
+};
+
+function showResult(res) {
+  const r = $("result");
+  const attempts = (res.log.match(/== attempt/g) || []).length;
+  if (!res.ok) {
+    const errs = [...res.log.matchAll(/ERROR: (.*)/g)].map(m => m[1]);
+    status(`No valid path after ${attempts} attempt(s).`, true);
+    r.innerHTML = `<div class="small">Last error: <b>${escapeHtml(errs.at(-1) || "see log")}</b></div>
+      <div class="muted small">Typical fixes: move a point out of the inflated walls, enlarge a checkpoint box,
+      raise RRT time, lower "Inflate walls", or check the map bound.</div>
+      <details open><summary>Planner log</summary><pre>${escapeHtml(res.log)}</pre></details>`;
+    return;
+  }
+  status(`Path OK (attempt ${attempts}). ${res.path.t.at(-1).toFixed(2)} s.`);
+  const summary = res.log.slice(res.log.lastIndexOf("GCOPTER plan OK"));
+  const base = `/api/file/${S.course.id}/${res.run}/`;
+  r.innerHTML = `<div class="row" style="flex-wrap:wrap">${res.files.map(f => `<a href="${base}${f}" download>${f}</a>`).join(" · ")}</div>
+    <div class="muted small">path.bin is the file the flight code plays (localizer/data/…). Format: planner/README.md "Output".</div>
+    <pre>${escapeHtml(summary)}</pre>
+    <details><summary>Full log</summary><pre>${escapeHtml(res.log)}</pre></details>`;
+  drawPath(res.path);
+}
+
+function escapeHtml(s) { return s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]); }
+
+function drawPath(p) {
+  S.path = p;
+  const vmax = Math.max(...p.speed, 0.01);
+  const pos = [], col = [], c = new THREE.Color();
+  p.pos.forEach((q, i) => {
+    pos.push(q[0], q[1], q[2]);
+    c.setHSL((1 - p.speed[i] / vmax) * 0.64, 0.9, 0.52);
+    col.push(c.r, c.g, c.b);
+  });
+  const geo = new LineGeometry(); geo.setPositions(pos); geo.setColors(col);
+  const mat = new LineMaterial({ vertexColors: true, linewidth: 4, worldUnits: false });
+  mat.resolution.set(view.clientWidth, view.clientHeight);
+  const line = new Line2(geo, mat); line.computeLineDistances();
+  pathGroup.add(line);
+  $("vmax").textContent = vmax.toFixed(2);
+  $("legend").style.display = "block";
+  $("play").style.display = "flex";
+  $("tSlider").max = p.t.at(-1); $("tSlider").step = 0.01;
+  setT(0);
+}
+
+// ---------- playback ----------
+let playing = false, lastFrame = 0;
+function setT(t) {
+  const p = S.path; if (!p) return;
+  const dt = p.t[1] - p.t[0];
+  const i = Math.min(p.t.length - 1, Math.max(0, Math.round(t / dt)));
+  const q = p.pos[i];
+  drone.position.set(q[0], q[1], q[2]); drone.visible = true;
+  $("tSlider").value = t;
+  $("tInfo").textContent = `t ${p.t[i].toFixed(2)} / ${p.t.at(-1).toFixed(2)} s · ${p.speed[i].toFixed(2)} m/s · (${q.map(v => v.toFixed(2)).join(", ")})`;
+}
+$("tSlider").oninput = () => setT(parseFloat($("tSlider").value));
+$("playBtn").onclick = () => {
+  playing = !playing; $("playBtn").textContent = playing ? "⏸" : "▶"; lastFrame = performance.now();
+  if (playing && parseFloat($("tSlider").value) >= S.path.t.at(-1) - 1e-6) setT(0);
+};
+
+function animate(now) {
+  requestAnimationFrame(animate);
+  if (playing && S.path) {
+    const t = parseFloat($("tSlider").value) + (now - lastFrame) / 1000;
+    lastFrame = now;
+    if (t >= S.path.t.at(-1)) { setT(S.path.t.at(-1)); playing = false; $("playBtn").textContent = "▶"; }
+    else setT(t);
+  }
+  controls.update();
+  renderer.render(scene, camera);
+  labels.render(scene, camera);
+}
+
+renderBoundInputs(); redraw(); resize(); requestAnimationFrame(animate);
+</script>
+</body>
+</html>

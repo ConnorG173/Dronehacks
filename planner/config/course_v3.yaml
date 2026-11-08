@@ -18,14 +18,14 @@ DilateRadius:     0.3                                 # 3 voxels; 0.93 m gap lea
 # ---- Mission (map frame) ----
 StartPos:         [-2.5146, 0.9144, 0.0]   # centre of 'Launch mark'
 StartHeadingDeg:  0.0               # ASSUMED: facing map +x (east, into the maze); set to the real launch heading
-HoverHeight:      1.0               # flight height above the pad; maze/tube/window all open at 1 m
+HoverHeight:      0.5               # the path starts at rest 0.5 m above the pad (the flight code takes off to it)
 # Checkpoints (cx cy cz hx hy hz), in flight order. ASSUMED course order, read off the CAD:
 Checkpoint:       [-1.9304, 2.5845, 1.0, 0.10, 0.12, 0.25]   # M1 maze gap (north end, y 2.121..3.048)
 Checkpoint:       [-0.8128, 0.9715, 1.0, 0.10, 0.12, 0.25]   # M2 maze gap (south end, y 0.508..1.435)
 Checkpoint:       [ 0.3048, 2.5845, 1.0, 0.10, 0.12, 0.25]   # M3 maze gap (north end)
 Checkpoint:       [ 2.3114, 0.4572, 0.94, 0.25, 0.30, 0.25]  # inside the oval tube (inner 1.46 x 1.82 m, axis along y)
 Checkpoint:       [-0.4710, -2.2715, 0.762, 0.08, 0.08, 0.12] # C2a window (0.914 m square, wall turned 20 deg)
-Goal:             [-2.0422, -0.7925, 1.0]  # 1 m above the centre of 'Landing pad 5 ft'
+Goal:             [-2.0422, -0.7925, 0.5]  # 0.5 m above the centre of 'Landing pad 5 ft', at rest; the flight code lands from here
 
 # ---- Front end and corridor (literals in upstream global_planning.cpp) ----
 TimeoutRRT:       0.5    # s per leg; upstream 0.01 cannot find the 0.2 m-wide (after dilation) maze gaps

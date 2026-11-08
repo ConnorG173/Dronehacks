@@ -63,6 +63,33 @@ def sample_triangles(tris, spacing):
     return np.concatenate(out)
 
 
+def transform_vertices(vertices, scale, up, yaw_deg, translate):
+    """CAD vertices (N x 3) -> map frame: Rz(yaw) * U * (scale * p) + translate."""
+    v = np.asarray(vertices, dtype=np.float64) * scale
+    if up == "y":
+        v = np.stack([v[:, 0], -v[:, 2], v[:, 1]], axis=1)
+    c, s = math.cos(math.radians(yaw_deg)), math.sin(math.radians(yaw_deg))
+    return v @ np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]]).T + np.array(translate, dtype=np.float64)
+
+
+def map_points(tris, spacing, add_floor=False):
+    """Surface samples of map-frame triangles (T x 3 x 3), deduplicated, as float32."""
+    pts = sample_triangles(tris, spacing)
+    if add_floor:
+        lo, hi = pts.min(axis=0), pts.max(axis=0)
+        gx, gy = np.meshgrid(np.arange(lo[0], hi[0], spacing), np.arange(lo[1], hi[1], spacing))
+        pts = np.concatenate([pts, np.stack([gx.ravel(), gy.ravel(), np.zeros(gx.size)], axis=1)])
+    # Drop near-duplicates (shared edges/vertices) on a spacing/2 grid.
+    _, idx = np.unique(np.round(pts / (0.5 * spacing)).astype(np.int64), axis=0, return_index=True)
+    return pts[np.sort(idx)].astype("<f4")
+
+
+def write_map(path, pts):
+    with open(path, "wb") as f:
+        f.write(b"DHMAP\0\0\0" + struct.pack("<IIQ", 1, 0, len(pts)))
+        f.write(pts.tobytes())
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("mesh", help="STL / OBJ / PLY (anything trimesh loads), or STEP with CadQuery")
@@ -77,24 +104,9 @@ def main():
     args = ap.parse_args()
 
     mesh = load_mesh(args.mesh)
-    v = np.asarray(mesh.vertices, dtype=np.float64) * args.scale
-    if args.up == "y":
-        v = np.stack([v[:, 0], -v[:, 2], v[:, 1]], axis=1)
-    c, s = math.cos(math.radians(args.yaw_deg)), math.sin(math.radians(args.yaw_deg))
-    v = v @ np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]]).T + np.array(args.translate)
-
-    pts = sample_triangles(v[np.asarray(mesh.faces)], args.spacing)
-    if args.add_floor:
-        lo, hi = pts.min(axis=0), pts.max(axis=0)
-        gx, gy = np.meshgrid(np.arange(lo[0], hi[0], args.spacing), np.arange(lo[1], hi[1], args.spacing))
-        pts = np.concatenate([pts, np.stack([gx.ravel(), gy.ravel(), np.zeros(gx.size)], axis=1)])
-    # Drop near-duplicates (shared edges/vertices) on a spacing/2 grid.
-    _, idx = np.unique(np.round(pts / (0.5 * args.spacing)).astype(np.int64), axis=0, return_index=True)
-    pts = pts[np.sort(idx)].astype("<f4")
-
-    with open(args.out, "wb") as f:
-        f.write(b"DHMAP\0\0\0" + struct.pack("<IIQ", 1, 0, len(pts)))
-        f.write(pts.tobytes())
+    v = transform_vertices(mesh.vertices, args.scale, args.up, args.yaw_deg, args.translate)
+    pts = map_points(v[np.asarray(mesh.faces)], args.spacing, args.add_floor)
+    write_map(args.out, pts)
 
     lo, hi = pts.min(axis=0), pts.max(axis=0)
     print("wrote %s: %d points from %d triangles" % (args.out, len(pts), len(mesh.faces)))

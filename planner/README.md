@@ -23,8 +23,27 @@ planner/
   maps/wall_demo.bin     demo map (tools/make_wall_map.py)
   tools/cad_to_map.py    CAD -> map file (laptop; numpy + trimesh, STEP needs CadQuery)
   tools/make_wall_map.py synthetic wall course (also imported by tests/run_tests.py)
+  web/                   browser UI: upload CAD, place points, plan, view the path (below)
   tests/                 upstream parity harness + tests
 ```
+
+## Web UI (any course)
+
+```bash
+python planner/web/server.py      # build the planner first; then open http://127.0.0.1:8765
+```
+
+Upload a course CAD file (STEP, STL, OBJ, PLY), set its units and up axis, then
+place the start (on the ground), checkpoints (boxes the path must pass through)
+and the goal by clicking in the 3D view. **Plan path** builds the map with
+`tools/cad_to_map.py`, writes a config (keys the page does not set, including the
+placeholder vehicle parameters, come from `config/course_v3.yaml`), runs
+`gcopter_planner` (retrying a few times, since the RRT is random) and draws the
+path coloured by speed, with playback. Download `path.bin` from the result and
+copy it to `../localizer/data/` to fly it. **Load course v3 + its mission**
+reproduces `config/course_v3.yaml`. Every upload and plan is kept under
+`out/web/<id>/plan-NNN/` (map, config, log, path). Localhost only; needs numpy,
+trimesh (+ CadQuery for STEP); three.js loads from unpkg.
 
 ## Build
 
@@ -102,9 +121,9 @@ upstream names have upstream `global_planning.yaml` defaults.
 | `VoxelWidth`, `DilateRadius` | voxel size and obstacle inflation (m); upstream 0.25 / 0.5 |
 | `StartPos` | takeoff pad on the ground, map frame = PX4 local origin |
 | `StartHeadingDeg` | vehicle heading at start, CCW from map +x = direction of PX4 local +x |
-| `HoverHeight` | the trajectory starts at rest at `StartPos + (0, 0, HoverHeight)` |
-| `Checkpoint` | `cx cy cz hx hy hz`: axis-aligned box (center, half-extents). Repeat in flight order. Must be free space |
-| `Goal` | end position (at rest) |
+| `HoverHeight` | the trajectory starts at rest at `StartPos + (0, 0, HoverHeight)` (0.5 m on the courses) |
+| `Checkpoint` | `cx cy cz hx hy hz`: axis-aligned box (center, half-extents). Repeat in flight order. Some of it must be free space (see step 2) |
+| `Goal` | end position (at rest). On the courses 0.5 m above the landing pad; the flight code lands from there |
 | `TimeoutRRT` | RRT time per leg (s). 0.01 as used by upstream `plan()` (the yaml's 0.02 is never used) |
 | `CorridorProgress`, `CorridorRange` | `convexCover` arguments, upstream literals 7.0 / 3.0 |
 | `MaxVelMag`, `MaxBdrMag`, `MaxTiltAngle`, `MinThrust`, `MaxThrust` | `magnitudeBounds` (m/s, rad/s, rad, N, N) |
@@ -168,8 +187,16 @@ without ROS. `src/main.cpp` marks each step with the upstream line number:
 
 1. `VoxelMap(MapBound / VoxelWidth, ...)`, `setOccupied` for every point,
    `dilate(ceil(DilateRadius / VoxelWidth))`.
-2. Start hover point, checkpoint centers and goal must be free
-   (`query == 0`, as upstream checks the goal).
+2. Start hover point and goal must be free (`query == 0`, as upstream checks
+   the goal). Each leg aims at a checkpoint's center if it is free; otherwise
+   at the free voxel center nearest to it that lies at least 2 cm inside the box
+   (printed as a `NOTE`). This lets a box drawn across a narrow opening, such as
+   a window whose inflated edges cover the box center, still be used. A box
+   with no free point fails.
+   The box only says the path must touch it: if the box sits beside an opening
+   rather than across it, the path can touch it and go around, or over a wall if
+   `MapBound` leaves room above the walls. Set the `MapBound` ceiling below the
+   wall tops if flying over walls is not allowed.
 3. `sfc_gen::planPath` (OMPL InformedRRT*) **leg by leg**: start -> C1 -> C2 ->
    ... -> goal; each leg must reach its target. `route.txt` (all legs joined)
    is written here.
@@ -182,7 +209,7 @@ without ROS. `src/main.cpp` marks each step with the upstream line number:
    (`h0 x + h1 y + h2 z + h3 <= 0`, upstream's format) placed between its two
    legs: `[leg 1 polytopes] box 1 [leg 2 polytopes] box 2 ... [last leg]`.
    `shortCut` keeps each leg's first and last polytope, which contain the leg's
-   endpoints (the checkpoint centers), so each box normally overlaps both
+   endpoints (the checkpoint targets, inside the boxes), so each box normally overlaps both
    neighbours. Overlap means the intersection holds a 1 cm ball
    (`geo_utils::overlap`, the margin `shortCut` uses); if either side does not
    overlap, the program fails with a clear error. With no checkpoints there
@@ -240,7 +267,8 @@ the RRT route in map coordinates (debugging and the parity test).
 The first row is at rest at `(0, 0, -HoverHeight)` with yaw 0: the flight code
 takes off, settles at that point, then follows the rows (`localizer/core/clock.py`
 slows the playback when the vehicle lags) and holds the last row (at rest at the
-goal) afterwards.
+goal, 0.5 m above the landing pad on the courses) afterwards; with `land_at_end`
+(simulator) it then requests NAV_LAND.
 
 ## Frames
 
