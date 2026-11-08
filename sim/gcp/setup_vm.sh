@@ -53,7 +53,7 @@ if [[ ! -f /opt/ros/humble/setup.bash ]]; then
   echo "deb [arch=amd64 signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu jammy main" |
     sudo tee /etc/apt/sources.list.d/ros2.list >/dev/null
   wait_apt; sudo apt-get update -q
-  sudo apt-get install -yq ros-humble-ros-base ros-humble-rviz2 python3-colcon-common-extensions python3-rosdep ros-humble-foxglove-bridge ros-humble-foxglove-msgs
+  sudo apt-get install -yq ros-humble-ros-base ros-humble-rviz2 python3-colcon-common-extensions python3-rosdep ros-humble-foxglove-bridge ros-humble-foxglove-msgs ros-humble-rosbag2-storage-mcap
 fi
 
 step "PX4-Autopilot ${PX4_TAG} (installs Gazebo Harmonic via PX4's ubuntu.sh)"

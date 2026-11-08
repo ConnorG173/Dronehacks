@@ -22,7 +22,7 @@ from geometry_msgs.msg import Point, Pose, TransformStamped, Vector3
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
-from tf2_ros import TransformBroadcaster
+from tf2_ros import StaticTransformBroadcaster, TransformBroadcaster
 
 REPO = os.environ.get("REPO", os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 OBJ = os.path.join(REPO, "sim/gz/models/dronehacks_course/meshes/course.obj")
@@ -93,6 +93,12 @@ class Viz(Node):
         self.pub_drone = self.create_publisher(SceneUpdate, "/viz/drone", 10)
         self.pub_trails = self.create_publisher(SceneUpdate, "/viz/trails", 10)
         self.tf = TransformBroadcaster(self)
+        # Always publish the course frame (static world -> course), so Foxglove can draw the course even when
+        # ground truth is missing (the drone then follows the VIO estimate instead).
+        self.static_tf = StaticTransformBroadcaster(self)
+        st = TransformStamped(); st.header.frame_id = "world"; st.child_frame_id = "course"; st.transform.rotation.w = 1.0
+        st.header.stamp = self.get_clock().now().to_msg(); self.static_tf.sendTransform(st)
+        self.last_gt = 0.0
         self.start, self.heading, self.cps, self.goal = read_course_config(COURSE)
         self.course_msg = self.build_course()
         self.cps_msg = self.build_checkpoints()
@@ -138,16 +144,20 @@ class Viz(Node):
         self.pub_cps.publish(self.cps_msg)
 
     def on_gt(self, m):
-        p, q = m.pose.pose.position, m.pose.pose.orientation
-        t = TransformStamped(); t.header.stamp = m.header.stamp; t.header.frame_id = "course"; t.child_frame_id = "drone_gt"
+        self.last_gt = self.get_clock().now().nanoseconds * 1e-9
+        self.draw_drone(m.header.stamp, m.pose.pose.position, m.pose.pose.orientation, gt=True)
+
+    def draw_drone(self, stamp, p, q, gt):
+        t = TransformStamped(); t.header.stamp = stamp; t.header.frame_id = "course"; t.child_frame_id = "drone_gt"
         t.transform.translation.x, t.transform.translation.y, t.transform.translation.z = p.x, p.y, p.z
         t.transform.rotation = q
         self.tf.sendTransform(t)
-        if self.gt and math.dist(self.gt[-1], (p.x, p.y, p.z)) > 1.0:   # respawn: start a new trail
-            self.gt.clear(); self.vio.clear()
-        if not self.gt or math.dist(self.gt[-1], (p.x, p.y, p.z)) > 0.02:
-            self.gt.append((p.x, p.y, p.z)); self.gt = self.gt[-4000:]
-        up = SceneUpdate(); e = SceneEntity(); e.frame_id = "drone_gt"; e.id = "drone"; e.timestamp = m.header.stamp
+        if gt:
+            if self.gt and math.dist(self.gt[-1], (p.x, p.y, p.z)) > 1.0:   # respawn: start a new trail
+                self.gt.clear(); self.vio.clear()
+            if not self.gt or math.dist(self.gt[-1], (p.x, p.y, p.z)) > 0.02:
+                self.gt.append((p.x, p.y, p.z)); self.gt = self.gt[-4000:]
+        up = SceneUpdate(); e = SceneEntity(); e.frame_id = "drone_gt"; e.id = "drone"; e.timestamp = stamp
         body = CubePrimitive(); body.pose = pose(z=0.05); body.size = Vector3(x=0.22, y=0.16, z=0.07)
         body.color = col(0.1, 0.1, 0.12); e.cubes.append(body)
         nose = CubePrimitive(); nose.pose = pose(0.15, 0.0, 0.05); nose.size = Vector3(x=0.08, y=0.03, z=0.03)
@@ -163,6 +173,11 @@ class Viz(Node):
         pt = (self.start[0] + c * p.x - s * p.y, self.start[1] + s * p.x + c * p.y, self.start[2] + p.z)
         if not self.vio or math.dist(self.vio[-1], pt) > 0.02:
             self.vio.append(pt); self.vio = self.vio[-4000:]
+        if self.get_clock().now().nanoseconds * 1e-9 - self.last_gt > 1.0:   # no ground truth: show the VIO pose
+            q = m.pose.pose.orientation; h = self.heading
+            qz, qw = math.sin(h / 2), math.cos(h / 2)   # rotate VIO orientation by the start heading
+            q2 = type(q)(); q2.w = qw * q.w - qz * q.z; q2.x = qw * q.x - qz * q.y; q2.y = qw * q.y + qz * q.x; q2.z = qw * q.z + qz * q.w
+            self.draw_drone(m.header.stamp, Point(x=pt[0], y=pt[1], z=pt[2]), q2, gt=False)
 
     def publish_trails(self):
         up = SceneUpdate(); e = SceneEntity(); e.frame_id = "course"; e.id = "trails"; e.timestamp = self.stamp()

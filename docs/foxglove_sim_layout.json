@@ -14,7 +14,7 @@
         "far": 5000
       },
       "followMode": "follow-none",
-      "followTfFrame": "course",
+      "followTfFrame": "world",
       "scene": {
         "enableStats": false,
         "backgroundColor": "#14161b",
