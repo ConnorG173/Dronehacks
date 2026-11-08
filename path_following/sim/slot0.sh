@@ -109,6 +109,15 @@ reset)
     sleep 20
   done
   echo "$chk" | grep -E "rate|xy_valid|armed|^OK|^FAIL" | head -10
+  # ground truth is what every run is scored against: once, a restart came up without it (cons01/02)
+  if ! dexec "$CONTAINER" bash -lc "source /opt/ros/humble/setup.bash && timeout 10 ros2 topic echo --once /sim/ground_truth/odom >/dev/null 2>&1"; then
+    echo "no /sim/ground_truth/odom: restarting the sim once more"
+    bash "$REPO/sim/run_sim.sh" 0 stop || true; sleep 3; bash "$REPO/sim/run_sim.sh" 0; sleep 180
+    dexec "$CONTAINER" bash -lc "source /opt/ros/humble/setup.bash && timeout 10 ros2 topic echo --once /sim/ground_truth/odom >/dev/null 2>&1" \
+      && echo "ground truth OK" || echo "WARNING: still no ground truth (runs cannot be scored)"
+  else
+    echo "ground truth OK"
+  fi
   ;;
 stop)
   tmux kill-window -t "$TMUX_SESSION:team" 2>/dev/null || true
