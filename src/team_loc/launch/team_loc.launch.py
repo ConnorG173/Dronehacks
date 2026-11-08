@@ -39,6 +39,8 @@ def generate_launch_description():
         DeclareLaunchArgument('right_info_topic', default_value='/oak/right/camera_info'),
         DeclareLaunchArgument('use_sim_time', default_value='false'),
         DeclareLaunchArgument('matcher_debug_dump_dir', default_value=''),
+        DeclareLaunchArgument('ignore_land_detector', default_value='false',
+                              description='hand-carry test only: anchor at start, freeze at first motion'),
     ]
     fuser = Node(
         package='team_loc', executable='loc_fuser', name='loc_fuser', output='screen', emulate_tty=True,
@@ -48,6 +50,7 @@ def generate_launch_description():
                 'course_config': L('course_config'),
                 'base_height_on_pad_m': L('base_height_on_pad_m'),
                 'enable_correction': L('enable_correction'),
+                'ignore_land_detector': L('ignore_land_detector'),
                 'use_sim_time': L('use_sim_time'),
             },
         ],

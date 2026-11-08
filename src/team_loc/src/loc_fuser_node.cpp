@@ -117,6 +117,9 @@ class LocFuser : public rclcpp::Node {
     max_fix_lag_s_ = declare_parameter<double>("max_fix_lag_s", 1.0);
 
     correction_enabled_ = declare_parameter<bool>("enable_correction", false);
+    // Bench/hand-carry test only: PX4 says "landed" while disarmed, which would re-anchor whenever
+    // the carried drone is held still. With this, anchor at start and freeze at the first motion.
+    ignore_land_detector_ = declare_parameter<bool>("ignore_land_detector", false);
     publish_tf_ = declare_parameter<bool>("publish_tf", true);
     course_frame_ = declare_parameter<std::string>("course_frame", "course");
     tf_child_frame_ = declare_parameter<std::string>("tf_child_frame", "map");
@@ -163,7 +166,7 @@ class LocFuser : public rclcpp::Node {
         });
     sub_land_ = create_subscription<px4_msgs::msg::VehicleLandDetected>(
         t_land, sensor_qos, [this](px4_msgs::msg::VehicleLandDetected::ConstSharedPtr m) {
-          anchor_.on_landed(now_s(), m->landed);
+          if (!ignore_land_detector_) anchor_.on_landed(now_s(), m->landed);
         });
     sub_lpos_ = create_subscription<px4_msgs::msg::VehicleLocalPosition>(
         t_lpos, sensor_qos, [this](px4_msgs::msg::VehicleLocalPosition::ConstSharedPtr m) {
@@ -460,6 +463,7 @@ class LocFuser : public rclcpp::Node {
   double prev_stamp_ = 0, t_last_fix_ = -1, last_fix_d2_ = 0, vio_floor_xy_m_ = 0.02, max_fix_lag_s_ = 1.0;
   double slew_residual_m_ = 0;
   bool have_prev_ = false;
+  bool ignore_land_detector_ = false;
   double jump_sigma_xy_m_ = 0.5, jump_sigma_yaw_rad_ = 0.26;
   int jump_recover_fixes_ = 3, fixes_since_jump_ = 0, n_jumps_ = 0;
   double jump_warn_s_ = 3.0, jump_warn_until_ = -1;
