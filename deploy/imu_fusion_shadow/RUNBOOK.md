@@ -26,6 +26,7 @@ and none of it is touched: no launch is stopped or restarted, and no parameter, 
 | `analyze.py` | scores a log: loop closure (position and yaw), tilt vs PX4, rates, dropouts |
 | `calib_check.py` | read-only IMU→camera rotation, time offset and accel scale, measured against the flight VIO (hand rotation) |
 | `build_vslam.sh`, `vslam_src.tgz` | build the patched cuVSLAM (IMU timestamp fix) into `./vio_ws` |
+| `heading_fix.py` | gyro heading correction: `offline <log>` replays a shadow log; `node` is a shadow ROS node (`/team_heading/odometry`) |
 | `calib.json` | IMU rotation, translation and accel scale. Seeded from the teammates' `~/team_ws/claude/imu_calib.json` (copied, not linked) |
 
 ## Step 0b: build the patched cuVSLAM (ASK FIRST: CPU for ~6-10 min; drone landed, disarmed)
@@ -113,6 +114,30 @@ Reading the result: `closure h` / `z` / `yaw` are pure drift for each estimator,
 it began. `lev` is what PX4 flew on in the two real flights, which ended ~50 cm off. Fusion is worth wiring to
 PX4 only if `imu` beats `lev` on closure yaw and closure h in every repeat, without tracking losses
 (`lost%`) or jumps.
+
+## PX4-IMU bench (does the OAK IMU's bad gravity cause the fused start-up jump?)
+
+The OAK BNO086 reads gravity 12% low (8.63 m/s^2, one-pose scale fix ×1.137). In the first OAK bench the fused
+shadow jumped ~4 m about 15 s after start with the drone still. Same bench with PX4's calibrated IMU:
+
+```bash
+bash shadow.sh check
+# which PX4 IMU topic is live? (read-only)
+docker exec skybeta-stack bash -c 'source /opt/ros/humble/setup.bash; source /root/skybeta_ws/install/local_setup.bash; \
+  timeout 6 ros2 topic hz /fmu/out/sensor_combined; timeout 6 ros2 topic hz /claude/usb/out/sensor_combined'
+PX4_IMU_TOPIC=/fmu/out/sensor_combined bash shadow.sh start px4      # or the /claude/usb/out one that publishes
+```
+
+Keep it untouched for 3 min, then `shadow.sh stop` and `python3 analyze.py logs/<stamp>_px4 --hfix`.
+`prep.log` prints `arrival-stamp median`: if it is far from the camera's (~60 ms), the PX4 clock is off
+from the camera clock, which fusion cannot tolerate.
+
+## Gyro heading correction (no cuVSLAM fusion at all)
+
+The logger records PX4 and OAK gyro intervals in every row, so any bench or hand-carry log can be re-scored
+with `analyze.py <log> --hfix`. That adds an `hfix` row: the levelled VIO with heading taken from the gyro.
+Start every test with **>= 10 s still**: the gyro bias is learned then. On synthetic data, for a 2 min 720 deg
+loop with VIO heading off by 2 % of every turn, the end error drops from 1.28 m to 0.004 m.
 
 ## Optional: PX4 IMU instead of the OAK's
 

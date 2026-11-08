@@ -24,7 +24,7 @@ from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPo
 from sensor_msgs.msg import Imu
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-PX4_QOS = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, durability=DurabilityPolicy.TRANSIENT_LOCAL,
+PX4_QOS = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, durability=DurabilityPolicy.VOLATILE,  # matches any publisher
                      history=HistoryPolicy.KEEP_LAST, depth=1)
 FRAME = 'team_imu_frame'
 
@@ -33,11 +33,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('source', nargs='?', default='oak', choices=['oak', 'px4'])
     ap.add_argument('--calib', default=os.path.join(HERE, 'calib.json'))
+    ap.add_argument('--px4-topic', default='/fmu/out/sensor_combined',
+                    help='px4 mode: /fmu/out/sensor_combined (UART DDS) or /claude/usb/out/sensor_combined (USB adapter)')
     a, _ = ap.parse_known_args()
     rclpy.init()
     n = Node('team_imu_prep')
     pub = n.create_publisher(Imu, '/team_imu/imu', qos_profile_sensor_data)
-    st = {'last': -1.0, 'n': 0, 'drop': 0, 'maxgap': 0.0, 't0': time.time()}
+    st = {'last': -1.0, 'n': 0, 'drop': 0, 'maxgap': 0.0, 't0': time.time(), 'age': []}
 
     def emit(m, t):
         if t <= st['last']:
@@ -47,6 +49,8 @@ def main():
             st['maxgap'] = max(st['maxgap'], t - st['last'])
         st['last'] = t
         st['n'] += 1
+        if len(st['age']) < 2000:
+            st['age'].append(time.time() - t)        # arrival minus stamp: clock offset + latency
         pub.publish(m)
 
     if a.source == 'oak':
@@ -76,14 +80,15 @@ def main():
             o.orientation_covariance[0] = -1.0          # no orientation
             emit(o, t_us * 1e-6)
 
-        n.create_subscription(SensorCombined, '/fmu/out/sensor_combined', on_px4, PX4_QOS)
-        n.get_logger().info(f'/fmu/out/sensor_combined (FRD) -> /team_imu/imu (FLU, frame {FRAME})')
+        n.create_subscription(SensorCombined, a.px4_topic, on_px4, PX4_QOS)
+        n.get_logger().info(f'{a.px4_topic} (FRD) -> /team_imu/imu (FLU, frame {FRAME})')
 
     def report():
         dt = time.time() - st['t0']
         n.get_logger().info(f"{st['n'] / max(dt, 1e-9):.1f} Hz out, {st['drop']} non-increasing stamps dropped, "
-                            f"max stamp gap {st['maxgap'] * 1000:.1f} ms")
-        st.update(n=0, drop=0, maxgap=0.0, t0=time.time())
+                            f"max stamp gap {st['maxgap'] * 1000:.1f} ms, arrival-stamp median "
+                            f"{(sorted(st['age'])[len(st['age']) // 2] * 1000 if st['age'] else float('nan')):.1f} ms")
+        st.update(n=0, drop=0, maxgap=0.0, t0=time.time(), age=[])
 
     n.create_timer(10.0, report)
     try:

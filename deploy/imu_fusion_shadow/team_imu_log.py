@@ -8,8 +8,13 @@
   --guard          with --out: if PX4 reports ARMED or NOT LANDED (or its telemetry goes stale > 3 s),
                    stop the shadow processes (cuVSLAM, IMU prep, TF) at once and exit.
 Telemetry comes from the USB adapter's return feed (/claude/usb/out/*), as the dashboard uses it.
+Gyro, for the offline heading correction (heading_fix.py): every row carries the body rotation integrated
+over that row's interval (rotation vector, base_link FLU, rad; plus dt and sample count) from PX4's
+sensor_combined (both the UART-DDS and the USB-adapter topic, whichever publishes) and from the OAK IMU
+(rotated into base_link with calib.json).
 """
 import argparse
+import os as _os
 import json
 import math
 import os
@@ -24,6 +29,8 @@ from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPo
 
 PX4_QOS = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, durability=DurabilityPolicy.VOLATILE,
                      history=HistoryPolicy.KEEP_LAST, depth=5)
+GYRO_QOS = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, durability=DurabilityPolicy.VOLATILE,
+                      history=HistoryPolicy.KEEP_LAST, depth=100)   # deep: a gyro sample lost is heading lost
 EST = {'raw': '/visual_slam/tracking/odometry', 'lev': '/claude/vio_leveled/odometry',
        'imu': '/team_imu/visual_slam/tracking/odometry'}
 STATUS = {'raw': '/visual_slam/status', 'imu': '/team_imu/visual_slam/status'}
@@ -47,6 +54,42 @@ def ang(a, b):
     return math.degrees(math.acos(float(np.clip(np.dot(a, b) / np.linalg.norm(a) / np.linalg.norm(b), -1, 1))))
 
 
+def rodrigues(v):
+    th = float(np.linalg.norm(v))
+    if th < 1e-12:
+        return np.eye(3)
+    k = v / th
+    K = np.array([[0, -k[2], k[1]], [k[2], 0, -k[0]], [-k[1], k[0], 0]])
+    return np.eye(3) + math.sin(th) * K + (1 - math.cos(th)) * K @ K
+
+
+def logvec(R):
+    c = float(np.clip((np.trace(R) - 1) / 2, -1, 1))
+    th = math.acos(c)
+    if th < 1e-9:
+        return np.zeros(3)
+    return th / (2 * math.sin(th)) * np.array([R[2, 1] - R[1, 2], R[0, 2] - R[2, 0], R[1, 0] - R[0, 1]])
+
+
+class GyroInt:
+    """Integrates body rates on their own stamps into one rotation per log row."""
+    def __init__(self):
+        self.R, self.dt, self.n, self.t_last = np.eye(3), 0.0, 0, None
+
+    def add(self, t, w):
+        if self.t_last is not None and 0.0 < t - self.t_last < 0.1:
+            d = t - self.t_last
+            self.R = self.R @ rodrigues(np.asarray(w) * d)
+            self.dt += d
+            self.n += 1
+        self.t_last = t
+
+    def take(self):
+        out = {'r': [round(float(x), 7) for x in logvec(self.R)], 'dt': round(self.dt, 5), 'n': self.n}
+        self.R, self.dt, self.n = np.eye(3), 0.0, 0
+        return out
+
+
 def yaw(R):
     return math.degrees(math.atan2(R[1, 0], R[0, 0]))
 
@@ -56,8 +99,10 @@ def main():
     ap.add_argument('--check', action='store_true')
     ap.add_argument('--out')
     ap.add_argument('--guard', action='store_true')
+    ap.add_argument('--calib', default=_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'calib.json'))
     a = ap.parse_args()
-    from px4_msgs.msg import VehicleAttitude, VehicleLandDetected, VehicleStatus
+    from px4_msgs.msg import SensorCombined, VehicleAttitude, VehicleLandDetected, VehicleStatus
+    from sensor_msgs.msg import Imu
     rclpy.init()
     n = Node('team_imu_log')
     s = {'armed': None, 'landed': None, 't_status': 0.0, 't_land': 0.0, 'px4': None, 't_px4': 0.0}
@@ -79,6 +124,24 @@ def main():
     n.create_subscription(VehicleStatus, '/claude/usb/out/vehicle_status_v1', on_status, PX4_QOS)
     n.create_subscription(VehicleLandDetected, '/claude/usb/out/vehicle_land_detected', on_land, PX4_QOS)
     n.create_subscription(VehicleAttitude, '/claude/usb/out/vehicle_attitude', on_att, PX4_QOS)
+
+    gyros = {'g_px4': GyroInt(), 'g_px4usb': GyroInt(), 'g_oak': GyroInt()}
+    try:
+        R_bi = np.array(json.load(open(a.calib))['R_base_imu'])
+    except Exception:  # noqa: BLE001
+        R_bi = None
+
+    def on_sc(key):
+        def cb(m):
+            g = m.gyro_rad
+            gyros[key].add(int(m.timestamp) * 1e-6, (float(g[0]), -float(g[1]), -float(g[2])))   # FRD -> FLU
+        return cb
+    n.create_subscription(SensorCombined, '/fmu/out/sensor_combined', on_sc('g_px4'), GYRO_QOS)
+    n.create_subscription(SensorCombined, '/claude/usb/out/sensor_combined', on_sc('g_px4usb'), GYRO_QOS)
+    if R_bi is not None:
+        n.create_subscription(Imu, '/oak/imu/data', lambda m: gyros['g_oak'].add(
+            m.header.stamp.sec + m.header.stamp.nanosec * 1e-9,
+            R_bi @ np.array([m.angular_velocity.x, m.angular_velocity.y, m.angular_velocity.z])), GYRO_QOS)
 
     def odo(k):
         def cb(m):
@@ -138,6 +201,9 @@ def main():
             row = {'t': round(now, 3), 'armed': s['armed'], 'landed': s['landed']}
             if s['px4'] is not None:
                 row['px4_R'] = s['px4'].round(5).tolist()
+            for gk, gi in gyros.items():
+                if gi.n:
+                    row[gk] = gi.take()
             for k in EST:
                 if s[k] is not None and now - s[k + '_t'] < 0.5:
                     row[k] = {'p': s[k][1].round(4).tolist(), 'q': [round(v, 5) for v in s[k][2]], 'vo': s[k + '_vo'],

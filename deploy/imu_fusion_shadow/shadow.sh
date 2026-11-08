@@ -22,9 +22,10 @@ dxd() { docker exec -d "$C" bash -c "$ENVS; $*"; }
 PAT='__node:=team_imu_vio|team_imu_prep.py|__node:=team_imu_tf|team_imu_log.py'
 
 stop_all() {
-  docker exec "$C" bash -c "pkill -INT -f team_imu_log.py; sleep 1; pkill -f '__node:=team_imu_vio'; pkill -f team_imu_prep.py; pkill -f '__node:=team_imu_tf'" 2>/dev/null
+  # bracketed patterns ([t]eam...) never match the pkill's own bash -c command line
+  docker exec "$C" bash -c "pkill -INT -f '[t]eam_imu_log.py'; sleep 1; pkill -f '__node:=[t]eam_imu_vio'; pkill -f '[t]eam_imu_prep.py'; pkill -f '__node:=[t]eam_imu_tf'" 2>/dev/null
   sleep 2
-  docker exec "$C" bash -c "pkill -9 -f '__node:=team_imu_vio'" 2>/dev/null
+  docker exec "$C" bash -c "pkill -9 -f '__node:=[t]eam_imu_vio'; pkill -9 -f '[t]eam_imu_prep.py'" 2>/dev/null
   true
 }
 
@@ -67,7 +68,7 @@ else FREQ=77.0; GN=0.001; GRW=0.0001; AN=0.01; ARW=0.002; fi
 echo "src=$SRC imu_q=($QX $QY $QZ $QW) t=($TX $TY $TZ) freq=$FREQ noise gn=$GN grw=$GRW an=$AN arw=$ARW" | tee "$HOSTKIT/$LOG/config.txt"
 cp "$HOSTKIT/calib.json" "$HOSTKIT/$LOG/"
 
-dxd "exec python3 -u $KIT/team_imu_prep.py $SRC --calib $KIT/calib.json > $KIT/$LOG/prep.log 2>&1"
+dxd "exec python3 -u $KIT/team_imu_prep.py $SRC --calib $KIT/calib.json --px4-topic ${PX4_IMU_TOPIC:-/fmu/out/sensor_combined} > $KIT/$LOG/prep.log 2>&1"
 dxd "exec /opt/ros/humble/lib/tf2_ros/static_transform_publisher --x $TX --y $TY --z $TZ --qx $QX --qy $QY --qz $QZ --qw $QW \
   --frame-id base_link --child-frame-id team_imu_frame --ros-args -r __node:=team_imu_tf > $KIT/$LOG/tf.log 2>&1"
 sleep 2
