@@ -12,7 +12,13 @@ CAD file (STEP/STL/OBJ/PLY)
 ```
 
 The browser page (`index.html`, three.js) shows the course in 3D. You place the
-start, checkpoints and goal, plan, and the path is drawn over the course. All the
+start, checkpoints and goal, plan, and the path is drawn over the course. Click
+on the path (with no placing mode active) to inspect a point: its position, time,
+speed, and the shortest distance to the net and to the nearest obstacle, with a
+line to each closest surface point (`/api/inspect`). Playback shows the keep-out
+radius (`map.dilate`) as a sphere around the drone that turns red wherever the
+path comes closer than that to a surface; those samples are also marked red on the
+path. All the
 real work is in `server.py` and its HTTP API, so other software can drive it
 without the page. You can also skip the web layer and call the tools directly
 (see the last section).
@@ -47,7 +53,9 @@ automatically:
 ```
 out/web/<id>/                  one per upload; <id> = 16 hex chars
   course.<ext>                 the uploaded CAD file
-  mesh.npz                     triangles in CAD units (vertices float64 N x 3, faces int64 M x 3)
+  mesh.npz                     triangles in CAD units (vertices float64 N x 3, faces int64 M x 3);
+                               STEP uploads also: part int32 M (part index per triangle),
+                               names str P (part names), kinds str P (net / floor / obstacle)
   plan-001/, plan-002/, ...    one per /api/plan call
     map.bin                    occupied-point map (DHMAP, ../README.md "Map file")
     config.yaml                the exact planner input (re-run: gcopter_planner config.yaml --out .)
@@ -72,10 +80,13 @@ Response:
 ```json
 {"id": "3d418c26bac492fb", "name": "UpdatedCourse.step", "triangles": 17065,
  "cadBounds": [[-3049.27, -3049.27, -6.35], [3049.27, 3049.27, 3049.27]],
- "scaleGuess": 0.001}
+ "scaleGuess": 0.001,
+ "parts": [{"name": "Boulder 2", "kind": "obstacle", "triangles": 1969}, ...]}
 ```
 `cadBounds` is in CAD units. `scaleGuess` is CAD units to metres, guessed from size
-(mm 0.001, inch 0.0254, m 1).
+(mm 0.001, inch 0.0254, m 1). `parts` lists the STEP file's named parts and how
+each is classified (see `/api/inspect`); it is empty for STL/OBJ/PLY, which carry
+no part names.
 
 ```bash
 curl -s --data-binary @UpdatedCourse.step "http://127.0.0.1:8765/api/upload?name=UpdatedCourse.step"
@@ -122,7 +133,7 @@ Request:
 | `map.spacing` | surface sample spacing (m); must be finer than `voxel` | (`--spacing`) |
 | `map.addFloor` | also sample the plane z = 0 (CAD without a floor) | (`--add-floor`) |
 | `map.voxel` | voxel size (m) | `VoxelWidth` |
-| `map.dilate` | obstacle inflation = vehicle radius + margin (m) | `DilateRadius` |
+| `map.dilate` | keep-out radius: obstacle inflation = vehicle radius + margin (m). The planner rounds it up to whole voxels (`ceil(dilate / voxel)`) and grows each occupied voxel by that as a cube | `DilateRadius` |
 | `map.bound` | `xmin xmax ymin ymax zmin zmax`; outside counts as a wall. `zmax` is the flight ceiling | `MapBound` |
 | `start` | the pad, **on the ground** | `StartPos` |
 | `heading` | the vehicle's yaw on the pad, degrees CCW from map +x. Defines the output frame | `StartHeadingDeg` |
@@ -142,11 +153,24 @@ Response:
 ```json
 {"ok": true, "run": "plan-003", "mapPoints": 294729,
  "log": "== attempt 1/5, exit 0\n...GCOPTER plan OK\n  total time : 9.567 s ...",
- "path": {"t": [0.0, 0.01, ...], "pos": [[-2.5146, 0.9144, 0.5], ...], "speed": [0.0, ...]},
+ "path": {"t": [0.0, 0.01, ...], "pos": [[-2.5146, 0.9144, 0.5], ...], "speed": [0.0, ...],
+          "clearance": [0.5, ...]},
+ "keepOut": 0.3,
  "files": ["path.bin", "path.csv", "route.txt", "config.yaml", "map.bin", "planner.log"]}
 ```
 - `path.pos` is in the **map frame** (for drawing). The flight file is `path.bin`
   in PX4 local NED (below).
+- `path.clearance` is each sample's distance (m) to the nearest surface in the
+  map, floor included (and the z = 0 plane if `addFloor`). Samples closer than
+  `keepOut + spacing` get the exact point-to-triangle distance; farther ones get the
+  distance to the nearest map sample point, at most `spacing / sqrt(3)` too large.
+  `keepOut` echoes `map.dilate`. Adds about 0.2 s per plan.
+- Geometric clearance is not the planner's voxel check. The planner's
+  `dilation margin : N of M 1-ms samples inside DilateRadius` counts samples in
+  dilated voxels, and those reach farther than the radius: a voxel is occupied if
+  any surface sample falls in it, and the dilation is a cube. On course v3 with
+  0.1 m voxels and a 0.3 m radius, one plan reported 2.6 s in the margin while only
+  0.05 s was geometrically closer than 0.3 m (closest approach 0.2997 m).
 - On failure, `ok` is false, and `path` and `files` are absent. `log` holds every
   attempt; the reason is on the `ERROR:` lines. Typical ones:
   - `... is inside an obstacle, its DilateRadius margin, or outside MapBound` (start
@@ -155,6 +179,32 @@ Response:
   - `no collision-free route ... within TimeoutRRT` (retry, raise `timeoutRRT`, or
     check that a gap is wider than 2 x `dilate`)
   - `trajectory misses checkpoint N` / limit violations (usually a retry fixes it)
+
+### `POST /api/inspect`: distance from a point to the net and obstacles
+
+Request: `{"id": "...", "transform": Transform, "point": [x, y, z]}` (map frame).
+Response:
+```json
+{"point": [-0.471, -2.2715, 0.762], "labeled": true,
+ "net":      {"dist": 0.7765, "closest": [-0.471, -3.048, 0.762], "part": "Net side south"},
+ "obstacle": {"dist": 0.4568, "closest": [-0.3147, -1.8422, 0.762], "part": "C2a chicane wall (window)"}}
+```
+- `dist` is the exact shortest distance (m) from `point` to the course triangles
+  (the same triangles the map is sampled from), `closest` the point on the surface
+  that realises it, `part` the STEP part it belongs to. It is not the distance to
+  the map's sample points or voxels, and ignores `dilate`.
+- Parts are classified by name when a STEP file is uploaded: a name containing
+  the word "net" is **net**; "floor", "landing pad", "launch mark", "guideline" or
+  "approach ring" (flat floor markings) is **floor**; everything else (walls,
+  dividers, barriers, tube and cradles, boulders) is an **obstacle**. The floor
+  is in neither answer. `FLOOR_WORDS` in `server.py` holds the list.
+- STEP part labels come from OCP's XCAF API: the named parts are meshed as one
+  compound with `load_mesh`'s settings, which reproduces its triangles exactly,
+  and each triangle is matched to its twin.
+- `labeled` is false for STL/OBJ/PLY uploads and for STEP files uploaded before
+  part labels existed (re-upload to get them). Then `net` is null and `obstacle`
+  is the nearest surface of any kind, floor included, with `part` null.
+- About 25 ms per request for the competition course (17k triangles).
 
 ### `GET /api/file/<id>/<run>/<name>`: download an output
 

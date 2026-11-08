@@ -61,6 +61,9 @@
     align-items: center; background: #000a; padding: 6px 10px; border-radius: 6px; }
   #play input[type=range] { flex: 1; }
   #play span { font-variant-numeric: tabular-nums; min-width: 230px; }
+  #inspect { position: absolute; left: 10px; top: 48px; background: #000c; padding: 7px 10px; border-radius: 6px;
+    font-size: 12px; font-variant-numeric: tabular-nums; display: none; max-width: 360px; pointer-events: none; }
+  #inspect .err { color: var(--err); }
 </style>
 </head>
 <body>
@@ -106,10 +109,13 @@
     <div id="wps"></div>
 
     <h2>3 · Plan</h2>
+    <div class="row"><label>Keep-out radius (m)</label><input type="number" id="dilate" value="0.3" step="0.05" min="0"></div>
+    <div class="muted small">Vehicle radius + safety margin. The planner inflates every surface (floor included)
+      by this, rounded up to whole voxels: <span id="korVox"></span>. It keeps the path out of that zone where it can;
+      time inside is reported, not refused. Playback shows the radius as a sphere around the drone, red when inside.</div>
     <details>
       <summary>Planner settings</summary>
       <div class="row"><label>Voxel (m)</label><input type="number" id="voxel" value="0.1" step="0.05"></div>
-      <div class="row"><label>Inflate walls (m)</label><input type="number" id="dilate" value="0.3" step="0.05"></div>
       <div class="row"><label>Sample spacing (m)</label><input type="number" id="spacing" value="0.04" step="0.01"></div>
       <div class="row"><label>Add floor at z=0</label><input type="checkbox" id="addFloor" style="flex:0"></div>
       <div class="row"><label>Max speed (m/s)</label><input type="number" id="maxVel" value="4" step="0.5"></div>
@@ -128,6 +134,9 @@
     <div class="row"><label>Cut away above z</label><input type="range" id="clip" min="0" max="1" step="0.01" value="1"></div>
     <div class="row"><label>X-ray walls</label><input type="checkbox" id="xray" style="flex:0"></div>
     <div class="row"><label>Show map bound</label><input type="checkbox" id="showBound" style="flex:0" checked></div>
+    <div class="row"><label>Keep-out sphere</label><input type="checkbox" id="showKor" style="flex:0" checked></div>
+    <div class="muted small">With no placing mode active, click on the path to inspect a point: position, time,
+      speed and the shortest distance to the net and to the nearest obstacle (lines show where to). Esc clears it.</div>
   </div>
 
   <div id="view">
@@ -135,6 +144,7 @@
     <div id="legend"><div>speed 0 → <span id="vmax"></span> m/s</div><div class="bar"></div></div>
     <div id="play"><button id="playBtn">▶</button><input type="range" id="tSlider" min="0" max="1" step="0.001" value="0"><span id="tInfo"></span></div>
     <div id="hint"></div>
+    <div id="inspect"></div>
   </div>
 </div>
 
@@ -204,6 +214,7 @@ let courseGroup = null;
 
 const markers = new THREE.Group(); scene.add(markers);
 const pathGroup = new THREE.Group(); scene.add(pathGroup);
+const inspectGroup = new THREE.Group(); scene.add(inspectGroup);  // clicked path point + distance lines
 const boundBox = new THREE.Box3Helper(new THREE.Box3(), 0x5c6675); scene.add(boundBox);
 
 const pickPlaneMat = new THREE.MeshBasicMaterial({ color: 0x4fa3ff, transparent: true, opacity: 0.12,
@@ -213,6 +224,10 @@ pickPlane.visible = false; scene.add(pickPlane);
 
 const drone = new THREE.Mesh(new THREE.SphereGeometry(0.09, 20, 14), new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x444444 }));
 drone.visible = false; scene.add(drone);
+// Keep-out radius around the drone during playback: unit sphere scaled to the radius the path was planned with.
+const korSphere = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 20),
+  new THREE.MeshBasicMaterial({ color: 0x3ccf7a, transparent: true, opacity: 0.2, depthWrite: false }));
+korSphere.visible = false; scene.add(korSphere);
 
 function resize() {
   const w = view.clientWidth, h = view.clientHeight;
@@ -333,6 +348,7 @@ function applyMission(m) {
   $("heading").value = m.heading; $("hover").value = m.hover; $("groundZ").value = m.start[2];
   $("maxVel").value = m.planner.maxVel; $("timeoutRRT").value = m.planner.timeoutRRT; $("tries").value = m.planner.tries;
   $("goalH").value = +(m.goal[2] - m.start[2]).toFixed(3);
+  showKorVoxels();
 }
 
 // ---------- view controls ----------
@@ -368,7 +384,7 @@ function setMode(m) {
   updatePickPlane();
 }
 for (const b of document.querySelectorAll("[data-mode]")) b.onclick = () => setMode(b.dataset.mode);
-window.addEventListener("keydown", e => { if (e.key === "Escape" && S.mode) setMode(S.mode); });
+window.addEventListener("keydown", e => { if (e.key === "Escape") S.mode ? setMode(S.mode) : clearInspect(); });
 function pickHeight() {
   if (S.mode === "start") return num("groundZ");
   if (S.mode === "goal") return num("groundZ") + num("goalH");
@@ -386,7 +402,11 @@ $("pickZ").oninput = $("groundZ").oninput = $("goalH").oninput = updatePickPlane
 let down = null;
 renderer.domElement.addEventListener("pointerdown", e => { down = [e.clientX, e.clientY]; });
 renderer.domElement.addEventListener("pointerup", e => {
-  if (!S.mode || !down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5) return;
+  if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5) return;
+  if (!S.mode) {  // no placing mode: a click on the path inspects it, elsewhere clears
+    const i = pickPathIndex(e);
+    return i < 0 ? clearInspect() : inspectPoint(i);
+  }
   const r = renderer.domElement.getBoundingClientRect();
   const ndc = new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
   const ray = new THREE.Raycaster(); ray.setFromCamera(ndc, camera);
@@ -493,7 +513,7 @@ $("hover").oninput = $("heading").oninput = redraw;
 
 // ---------- planning ----------
 function clearPath() {
-  clearGroup(pathGroup); S.path = null; drone.visible = false;
+  clearGroup(pathGroup); clearInspect(); S.path = null; drone.visible = korSphere.visible = false;
   $("legend").style.display = $("play").style.display = "none";
   $("result").innerHTML = "";
 }
@@ -533,17 +553,21 @@ function showResult(res) {
   status(`Path OK (attempt ${attempts}). ${res.path.t.at(-1).toFixed(2)} s.`);
   const summary = res.log.slice(res.log.lastIndexOf("GCOPTER plan OK"));
   const base = `/api/file/${S.course.id}/${res.run}/`;
-  r.innerHTML = `<div class="row" style="flex-wrap:wrap">${res.files.map(f => `<a href="${base}${f}" download>${f}</a>`).join(" · ")}</div>
+  const cl = res.path.clearance, dt = res.path.t[1] - res.path.t[0];
+  const iMin = cl.indexOf(Math.min(...cl)), inside = cl.filter(c => c < res.keepOut).length;
+  r.innerHTML = `<div class="small">Keep-out radius ${res.keepOut} m: inside it for <b>${(inside * dt).toFixed(2)} s</b>
+      ${inside ? "(red on the path)" : ""} · closest approach <b>${cl[iMin].toFixed(3)} m</b> at t ${res.path.t[iMin].toFixed(2)} s</div>
+    <div class="row" style="flex-wrap:wrap">${res.files.map(f => `<a href="${base}${f}" download>${f}</a>`).join(" · ")}</div>
     <div class="muted small">path.bin is the file the flight code plays (localizer/data/…). Format: planner/README.md "Output".</div>
     <pre>${escapeHtml(summary)}</pre>
     <details><summary>Full log</summary><pre>${escapeHtml(res.log)}</pre></details>`;
-  drawPath(res.path);
+  drawPath(res.path, res.keepOut);
 }
 
 function escapeHtml(s) { return s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]); }
 
-function drawPath(p) {
-  S.path = p;
+function drawPath(p, keepOut) {
+  S.path = p; p.keepOut = keepOut;
   const vmax = Math.max(...p.speed, 0.01);
   const pos = [], col = [], c = new THREE.Color();
   p.pos.forEach((q, i) => {
@@ -556,11 +580,75 @@ function drawPath(p) {
   mat.resolution.set(view.clientWidth, view.clientHeight);
   const line = new Line2(geo, mat); line.computeLineDistances();
   pathGroup.add(line);
+  const inside = p.pos.filter((q, i) => p.clearance[i] < keepOut).flat();  // samples inside the keep-out radius
+  if (inside.length) {
+    const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(inside, 3));
+    pathGroup.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0xff3b3b, size: 7, sizeAttenuation: false })));
+  }
   $("vmax").textContent = vmax.toFixed(2);
   $("legend").style.display = "block";
   $("play").style.display = "flex";
   $("tSlider").max = p.t.at(-1); $("tSlider").step = 0.01;
   setT(0);
+}
+
+// ---------- inspect a path point ----------
+const INSPECT_COLOR = { net: 0xc792ff, obstacle: 0xffffff };
+let inspectSeq = 0;  // drops answers that arrive after a newer click or a clear
+
+function clearInspect() { inspectSeq++; clearGroup(inspectGroup); $("inspect").style.display = "none"; }
+
+// Nearest path sample within 10 px of the click, in screen space (simpler than raycasting a Line2).
+function pickPathIndex(e) {
+  const p = S.path; if (!p) return -1;
+  const r = renderer.domElement.getBoundingClientRect();
+  const mx = e.clientX - r.left, my = e.clientY - r.top, v = new THREE.Vector3();
+  let best = -1, bestD = 10;
+  p.pos.forEach((q, i) => {
+    v.set(q[0], q[1], q[2]).project(camera);
+    if (v.z < -1 || v.z > 1) return;  // behind the camera or past the far plane
+    const d = Math.hypot((v.x + 1) / 2 * r.width - mx, (1 - v.y) / 2 * r.height - my);
+    if (d < bestD) { bestD = d; best = i; }
+  });
+  return best;
+}
+
+function inspectDot(pos, color, radius) {  // drawn on top of the course (depthTest off)
+  const m = new THREE.Mesh(new THREE.SphereGeometry(radius, 16, 12), new THREE.MeshBasicMaterial({ color, depthTest: false }));
+  m.position.copy(pos); m.renderOrder = 10; inspectGroup.add(m);
+}
+
+async function inspectPoint(i) {
+  clearInspect();
+  const seq = inspectSeq, p = S.path, q = p.pos[i], P = new THREE.Vector3(...q), box = $("inspect");
+  inspectDot(P, 0xffe14d, 0.05);
+  const head = `<div><b>Path point</b> · t ${p.t[i].toFixed(2)} s · ${p.speed[i].toFixed(2)} m/s</div>`
+    + `<div>x ${q[0].toFixed(3)} · y ${q[1].toFixed(3)} · z ${q[2].toFixed(3)} m</div>`;
+  box.innerHTML = head + '<div class="muted">measuring…</div>'; box.style.display = "block";
+  let res;
+  try {
+    res = await (await api("/api/inspect", { method: "POST",
+      body: JSON.stringify({ id: S.course.id, transform: transform(), point: q }) })).json();
+  } catch (e) {
+    if (seq === inspectSeq) box.innerHTML = head + `<div class="err">${escapeHtml(e.message)}</div>`;
+    return;
+  }
+  if (seq !== inspectSeq) return;
+  const row = (key, title) => {
+    const hex = "#" + INSPECT_COLOR[key].toString(16).padStart(6, "0"), h = res[key];
+    const tag = `<span class="tag" style="background:${hex}"></span> ${title}: `;
+    if (!h) return `<div>${tag}n/a</div>`;
+    const C = new THREE.Vector3(...h.closest);
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([P, C]),
+      new THREE.LineBasicMaterial({ color: INSPECT_COLOR[key], depthTest: false }));
+    line.renderOrder = 10; inspectGroup.add(line);
+    inspectDot(C, INSPECT_COLOR[key], 0.03);
+    inspectGroup.add(label(h.dist.toFixed(3) + " m", P.clone().lerp(C, 0.5)));
+    return `<div>${tag}<b>${h.dist.toFixed(3)} m</b> <span class="muted">${escapeHtml(h.part || "")}</span></div>`;
+  };
+  box.innerHTML = head + row("net", "Net") + row("obstacle", res.labeled ? "Obstacle" : "Nearest surface")
+    + (res.labeled ? "" : '<div class="muted small">No part names (STL/OBJ/PLY upload, or a STEP uploaded before '
+      + 'part labels existed): the net is n/a and the distance is to any surface, floor included.</div>');
 }
 
 // ---------- playback ----------
@@ -571,9 +659,21 @@ function setT(t) {
   const i = Math.min(p.t.length - 1, Math.max(0, Math.round(t / dt)));
   const q = p.pos[i];
   drone.position.set(q[0], q[1], q[2]); drone.visible = true;
+  const c = p.clearance[i], inside = c < p.keepOut;
+  korSphere.position.copy(drone.position); korSphere.scale.setScalar(Math.max(p.keepOut, 1e-3));
+  korSphere.material.color.set(inside ? 0xff3b3b : 0x3ccf7a);
+  korSphere.visible = $("showKor").checked;
   $("tSlider").value = t;
-  $("tInfo").textContent = `t ${p.t[i].toFixed(2)} / ${p.t.at(-1).toFixed(2)} s · ${p.speed[i].toFixed(2)} m/s · (${q.map(v => v.toFixed(2)).join(", ")})`;
+  $("tInfo").textContent = `t ${p.t[i].toFixed(2)} / ${p.t.at(-1).toFixed(2)} s · ${p.speed[i].toFixed(2)} m/s · (${q.map(v => v.toFixed(2)).join(", ")})`
+    + ` · clearance ${c.toFixed(2)} m${inside ? " < keep-out " + p.keepOut + " m" : ""}`;
 }
+$("showKor").onchange = () => { korSphere.visible = $("showKor").checked && !!S.path; };
+
+function showKorVoxels() {  // the planner dilates by ceil(radius / voxel) whole voxels
+  const r = num("dilate"), v = num("voxel"), n = Math.ceil(r / v - 1e-9);
+  $("korVox").textContent = v > 0 && r >= 0 ? `${n} voxel${n === 1 ? "" : "s"} = ${(n * v).toFixed(2)} m` : "?";
+}
+$("dilate").oninput = $("voxel").oninput = showKorVoxels;
 $("tSlider").oninput = () => setT(parseFloat($("tSlider").value));
 $("playBtn").onclick = () => {
   playing = !playing; $("playBtn").textContent = playing ? "⏸" : "▶"; lastFrame = performance.now();
@@ -593,7 +693,7 @@ function animate(now) {
   labels.render(scene, camera);
 }
 
-renderBoundInputs(); redraw(); resize(); requestAnimationFrame(animate);
+renderBoundInputs(); redraw(); resize(); showKorVoxels(); requestAnimationFrame(animate);
 </script>
 </body>
 </html>

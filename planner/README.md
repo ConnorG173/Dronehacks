@@ -39,7 +39,11 @@ and the goal by clicking in the 3D view. **Plan path** builds the map with
 `tools/cad_to_map.py`, writes a config (keys the page does not set, including the
 placeholder vehicle parameters, come from `config/course_v3.yaml`), runs
 `gcopter_planner` (retrying a few times, since the RRT is random) and draws the
-path coloured by speed, with playback. Download `path.bin` from the result and
+path coloured by speed, with playback. Click on the path to inspect a point
+(position, time, speed, and the shortest distance to the net and to the nearest
+obstacle, taken from the STEP part names). **Keep-out radius** (`DilateRadius`) is
+in section 3; playback shows it as a sphere around the drone, red where the path
+is closer than that to a surface. Download `path.bin` from the result and
 copy it to `../localizer/data/` to fly it. **Load course v3 + its mission**
 reproduces `config/course_v3.yaml`. Every upload and plan is kept under
 `out/web/<id>/plan-NNN/` (map, config, log, path). Localhost only; needs numpy,
