@@ -393,7 +393,7 @@ class LocFuser : public rclcpp::Node {
     in.fix_age_s = t_last_fix_ < 0 ? -1.0 : t - t_last_fix_;
     in.slew_residual_m = slew_residual_m_;
     in.jump_absorbed = t < jump_warn_until_;
-    const bool airborne = anchor_.state() == AnchorTracker::State::Frozen;
+    const bool airborne = anchor_.airborne(t);
     in.vio_frozen = sanity_->frozen(t, airborne);
     in.vio_static = sanity_->static_pose(t, airborne);
     in.z_disagree_m = sanity_->z_disagreement(t);

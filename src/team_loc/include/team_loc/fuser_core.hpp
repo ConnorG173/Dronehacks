@@ -52,6 +52,8 @@ class AnchorTracker {
   const Iso3& T_course_odom() const { return T_course_odom_; }
   const std::string& tilt_source() const { return tilt_source_; }
   bool land_known(double t) const { return t_landed_ >= 0 && t - t_landed_ < p_.px4_timeout_s; }
+  // In the air: took off (frozen anchor) and PX4 does not say landed (after landing it does).
+  bool airborne(double t) const { return state_ == State::Frozen && !(land_known(t) && landed_); }
   int anchor_count() const { return anchor_count_; }
 
  private:

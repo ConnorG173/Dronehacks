@@ -239,3 +239,16 @@ TEST(Anchor, AbsorbKeepsCoursePoseContinuousAcrossAVioJump) {
   Iso3 fwd = post * make_iso(Mat3::Identity(), Vec3(1, 0, 0));
   EXPECT_NEAR((course_pos(a, fwd) - before).norm(), 1.0, 1e-9);
 }
+
+TEST(Anchor, AirborneOnlyBetweenTakeoffAndLanding) {
+  AnchorTracker a(params());
+  a.on_landed(0, true);
+  a.on_odom(0, at(0, 0), 0.0, true);
+  EXPECT_FALSE(a.airborne(0));
+  a.on_landed(0.5, false);
+  a.on_odom(0.5, at(0.3, 0), 0.5, true);
+  EXPECT_TRUE(a.airborne(0.5));
+  a.on_landed(5.0, true);                 // landed at the goal: not airborne, anchor stays frozen
+  EXPECT_FALSE(a.airborne(5.0));
+  EXPECT_EQ(a.state(), AnchorTracker::State::Frozen);
+}
