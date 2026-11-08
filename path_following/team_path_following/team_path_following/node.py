@@ -351,7 +351,10 @@ class MissionTracker(Node):
         if last is not None and st <= last:
             return None
         self._stamps[key] = st
-        src_age = self.get_clock().now().nanoseconds * 1e-9 - st
+        clock_now = self.get_clock().now().nanoseconds * 1e-9
+        if clock_now <= 0.0:
+            return now          # sim clock not received yet: decide the clock domain later
+        src_age = clock_now - st
         if key not in self._stamp_domain:
             self._stamp_domain[key] = -0.5 < src_age < self.gp('stamp_max_age_s')
             if not self._stamp_domain[key]:
