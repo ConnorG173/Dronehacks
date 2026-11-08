@@ -29,6 +29,7 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <px4_msgs/msg/vehicle_attitude.hpp>
 #include <px4_msgs/msg/vehicle_land_detected.hpp>
+#include <px4_msgs/msg/vehicle_local_position.hpp>
 #include <px4_msgs/msg/vehicle_status.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <tf2_eigen/tf2_eigen.hpp>
@@ -126,6 +127,12 @@ class LocFuser : public rclcpp::Node {
     const auto t_att = declare_parameter<std::string>("attitude_topic", "/fmu/out/vehicle_attitude");
     const auto t_land = declare_parameter<std::string>("land_detected_topic", "/fmu/out/vehicle_land_detected");
     const auto t_vs = declare_parameter<std::string>("vehicle_status_topic", "/fmu/out/vehicle_status_v1");
+    const auto t_lpos = declare_parameter<std::string>("local_position_topic", "/fmu/out/vehicle_local_position");
+    SanityParams snp;
+    snp.identical_s = declare_parameter<double>("frozen_identical_s", snp.identical_s);
+    snp.max_z_disagree_m = declare_parameter<double>("max_z_disagree_m", snp.max_z_disagree_m);
+    max_z_disagree_m_ = snp.max_z_disagree_m;
+    sanity_ = std::make_unique<VioSanity>(snp);
     const auto t_out = declare_parameter<std::string>("odom_map_topic", "/team/odom_map");
     const auto t_status = declare_parameter<std::string>("status_topic", "/team/loc/status");
     const auto t_corr = declare_parameter<std::string>("correction_topic", "/team/loc/correction");
@@ -156,6 +163,10 @@ class LocFuser : public rclcpp::Node {
     sub_land_ = create_subscription<px4_msgs::msg::VehicleLandDetected>(
         t_land, sensor_qos, [this](px4_msgs::msg::VehicleLandDetected::ConstSharedPtr m) {
           anchor_.on_landed(now_s(), m->landed);
+        });
+    sub_lpos_ = create_subscription<px4_msgs::msg::VehicleLocalPosition>(
+        t_lpos, sensor_qos, [this](px4_msgs::msg::VehicleLocalPosition::ConstSharedPtr m) {
+          if (m->dist_bottom_valid && std::isfinite(m->dist_bottom)) sanity_->on_range(now_s(), m->dist_bottom);
         });
     sub_vs_ = create_subscription<px4_msgs::msg::VehicleStatus>(
         t_vs, sensor_qos, [this](px4_msgs::msg::VehicleStatus::ConstSharedPtr m) {
@@ -224,6 +235,7 @@ class LocFuser : public rclcpp::Node {
 
     const Iso3 T_course_odom = applied_correction_.iso() * anchor_.T_course_odom();
     const Iso3 T_course_base = T_course_odom * T_odom_base;
+    sanity_->on_odom(t, T_odom_base, T_course_base.translation().z());
     const double dist = vio_.path_length() - path_at_anchor_;
     std::array<double, 36> cov = pose_covariance(cp_, dist, &sigma_xy_, &sigma_yaw_);
     if (correction_enabled_) {
@@ -366,6 +378,9 @@ class LocFuser : public rclcpp::Node {
     in.moving = vio_.speed() > 0.1 && anchor_.state() == AnchorTracker::State::Frozen;
     in.fix_age_s = t_last_fix_ < 0 ? -1.0 : t - t_last_fix_;
     in.slew_residual_m = slew_residual_m_;
+    in.vio_frozen = sanity_->frozen(t, anchor_.state() == AnchorTracker::State::Frozen);
+    in.z_disagree_m = sanity_->z_disagreement(t);
+    in.max_z_disagree_m = max_z_disagree_m_;
     in.consecutive_rejected = filter_->consecutive_rejected();
     const StatusResult r = evaluate_status(in, sp_);
 
@@ -389,6 +404,8 @@ class LocFuser : public rclcpp::Node {
     kv("vio_rate_hz", fmt(in.vio_rate_hz, 1));
     kv("vio_age_s", fmt(std::min(in.vio_age_s, 999.0)));
     kv("vio_jump", in.jump_latched ? "true" : "false");
+    kv("vio_frozen", in.vio_frozen ? "true" : "false");
+    kv("z_vio_vs_range_m", in.z_disagree_m < 0 ? "unknown" : fmt(in.z_disagree_m));
     kv("dist_since_anchor_m", fmt(vio_.path_length() - path_at_anchor_, 2));
     kv("sigma_xy_m", fmt(sigma_xy_));
     kv("sigma_yaw_deg", fmt(sigma_yaw_ * 180.0 / M_PI, 2));
@@ -449,6 +466,9 @@ class LocFuser : public rclcpp::Node {
   rclcpp::Subscription<px4_msgs::msg::VehicleAttitude>::SharedPtr sub_att_;
   rclcpp::Subscription<px4_msgs::msg::VehicleLandDetected>::SharedPtr sub_land_;
   rclcpp::Subscription<px4_msgs::msg::VehicleStatus>::SharedPtr sub_vs_;
+  rclcpp::Subscription<px4_msgs::msg::VehicleLocalPosition>::SharedPtr sub_lpos_;
+  std::unique_ptr<VioSanity> sanity_;
+  double max_z_disagree_m_ = 0.35;
   rclcpp::TimerBase::SharedPtr status_timer_;
 };
 

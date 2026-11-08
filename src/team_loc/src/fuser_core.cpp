@@ -110,6 +110,39 @@ double VioMonitor::rate_hz(double now) const {
   return k / p_.rate_window_s;
 }
 
+// ------------------------------------------------------------------------------------ sanity
+void VioSanity::on_odom(double t, const Iso3& T, double z_course) {
+  const bool same = have_ && T.translation() == last_.translation() && T.linear() == last_.linear();
+  if (!same) identical_since_ = t;
+  last_ = T;
+  have_ = true;
+  zvio_.emplace_back(t, z_course);
+  while (!zvio_.empty() && t - zvio_.front().first > 3 * p_.window_s) zvio_.pop_front();
+}
+
+void VioSanity::on_range(double t, double r) {
+  rng_.emplace_back(t, r);
+  while (!rng_.empty() && t - rng_.front().first > 3 * p_.window_s) rng_.pop_front();
+}
+
+bool VioSanity::at(const std::deque<std::pair<double, double>>& d, double t, double& v) {
+  if (d.empty() || t < d.front().first) return false;
+  for (auto it = d.rbegin(); it != d.rend(); ++it)
+    if (it->first <= t) {
+      v = it->second;
+      return true;
+    }
+  return false;
+}
+
+double VioSanity::z_disagreement(double t) const {
+  if (zvio_.empty() || rng_.empty()) return -1;
+  if (t - zvio_.back().first > 0.3 || t - rng_.back().first > 0.3) return -1;  // stale input
+  double z0, r0;
+  if (!at(zvio_, t - p_.window_s, z0) || !at(rng_, t - p_.window_s, r0)) return -1;
+  return std::abs((rng_.back().second - r0) - (zvio_.back().second - z0));
+}
+
 // ------------------------------------------------------------------------------------ status
 StatusResult evaluate_status(const StatusInputs& in, const StatusParams& p) {
   StatusResult r;
@@ -120,10 +153,12 @@ StatusResult evaluate_status(const StatusInputs& in, const StatusParams& p) {
   if (in.jump_latched) err.push_back("VIO jump");
   if (!in.anchored) err.push_back("not anchored");
   if (in.correction_enabled && in.sigma_xy_m > p.error_sigma_xy_m) err.push_back("sigma_xy too large");
+  if (in.vio_frozen) err.push_back("VIO frozen (identical poses in flight)");
 
   if (in.vio_ever && in.vio_age_s <= p.vio_timeout_s && in.vio_rate_hz < p.min_rate_hz)
     warn.push_back("VIO rate low");
   if (in.vo_state == 3) warn.push_back("VIO heuristic (vo_state 3)");
+  if (in.z_disagree_m > in.max_z_disagree_m) warn.push_back("VIO height disagrees with rangefinder");
   if (in.vo_state == 0) warn.push_back("VIO state unknown (vo_state 0)");
   if (in.correction_enabled) {
     if (in.sigma_xy_m > p.warn_sigma_xy_m) warn.push_back("sigma_xy high");

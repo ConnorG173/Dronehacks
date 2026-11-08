@@ -100,6 +100,36 @@ class VioMonitor {
 };
 
 // ---------------------------------------------------------------------------------------------
+// VIO sanity against things vision cannot fake. cuVSLAM can report vo_state 1 with a frozen pose
+// (seen in sim on blank images): bit-identical poses while airborne -> frozen. And the rangefinder
+// (PX4 dist_bottom) is independent of vision: its height change over a window should match VIO's.
+struct SanityParams {
+  double identical_s = 1.0;      // identical poses this long while airborne = frozen
+  double window_s = 1.0;         // height-change comparison window
+  double max_z_disagree_m = 0.35;
+};
+
+class VioSanity {
+ public:
+  explicit VioSanity(const SanityParams& p) : p_(p) {}
+  void on_odom(double t, const Iso3& T_odom_base, double z_course);
+  void on_range(double t, double dist_bottom_m);
+  bool frozen(double t, bool airborne) const {
+    return airborne && have_ && (t - identical_since_) >= p_.identical_s;
+  }
+  // |range change - VIO z change| over the last window; -1 if either series is too short.
+  double z_disagreement(double t) const;
+
+ private:
+  static bool at(const std::deque<std::pair<double, double>>& d, double t, double& v);
+  SanityParams p_;
+  bool have_ = false;
+  Iso3 last_ = Iso3::Identity();
+  double identical_since_ = 0;
+  std::deque<std::pair<double, double>> zvio_, rng_;
+};
+
+// ---------------------------------------------------------------------------------------------
 // Status levels (diagnostic_msgs/DiagnosticStatus OK = 0, WARN = 1, ERROR = 2).
 struct StatusParams {
   double vio_timeout_s = 0.2;
@@ -125,6 +155,9 @@ struct StatusInputs {
   bool moving = false;
   double slew_residual_m = 0;      // estimated minus applied correction (correction enabled only)
   int consecutive_rejected = 0;
+  bool vio_frozen = false;
+  double z_disagree_m = -1;        // VIO vs rangefinder height change; -1 = unknown
+  double max_z_disagree_m = 0.35;
 };
 
 struct StatusResult {

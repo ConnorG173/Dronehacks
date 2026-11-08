@@ -159,3 +159,37 @@ TEST(Cov, GrowsWithDistance) {
   EXPECT_DOUBLE_EQ(c[0], c[7]);
   EXPECT_GT(c[35], 0);
 }
+
+TEST(Sanity, FrozenVioAndRangefinderDisagreement) {
+  VioSanity s(SanityParams{});
+  // Frozen: identical poses while airborne for >= 1 s; a climb shows on the rangefinder only.
+  for (int i = 0; i <= 40; ++i) {
+    const double t = i * 0.033;
+    s.on_odom(t, at(0, 0), 0.0);
+    s.on_range(t, 0.1 + 0.8 * t);
+  }
+  EXPECT_FALSE(s.frozen(1.32, false));     // on the ground: a still pose is normal
+  EXPECT_TRUE(s.frozen(1.32, true));
+  EXPECT_GT(s.z_disagreement(1.32), 0.7);
+  // Healthy: VIO and rangefinder climb together, tiny jitter.
+  VioSanity h(SanityParams{});
+  for (int i = 0; i <= 40; ++i) {
+    const double t = i * 0.033;
+    h.on_odom(t, at(1e-4 * (i % 3), 0), 0.8 * t);
+    h.on_range(t, 0.1 + 0.8 * t);
+  }
+  EXPECT_FALSE(h.frozen(1.32, true));
+  EXPECT_LT(h.z_disagreement(1.32), 0.05);
+  StatusParams p;
+  StatusInputs in;
+  in.vio_ever = true;
+  in.vio_age_s = 0.03;
+  in.vio_rate_hz = 30;
+  in.anchored = true;
+  in.vo_state = 1;
+  in.vio_frozen = true;
+  EXPECT_EQ(evaluate_status(in, p).level, 2);
+  in.vio_frozen = false;
+  in.z_disagree_m = 0.5;
+  EXPECT_EQ(evaluate_status(in, p).level, 1);
+}

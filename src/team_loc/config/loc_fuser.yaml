@@ -21,6 +21,9 @@ loc_fuser:
     jump_sigma_xy_m: 0.5             # after a jump: widen the correction, re-acquire from fixes
     jump_sigma_yaw_deg: 15.0
     jump_recover_fixes: 3
+    # VIO sanity (vision cannot fake these)
+    frozen_identical_s: 1.0          # bit-identical VIO poses this long in flight -> ERROR
+    max_z_disagree_m: 0.35           # |rangefinder - VIO| height change over 1 s -> WARN
     # covariance model (anchor + drift per metre flown)
     anchor_sigma_xy_m: 0.05
     anchor_sigma_z_m: 0.03
