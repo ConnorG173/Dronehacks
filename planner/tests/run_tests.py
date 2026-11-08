@@ -227,9 +227,19 @@ def checkpoints():
         check(len(t) == 1, "one checkpoint: path.csv enters the box (t = %s)" % t)
 
     cfg, out = write_cfg("two_checkpoints", map_file, bound, start, hover, goal, [c1, c2])
-    code, log = run([PLANNER, cfg, "--out", out])
+    # The RRT front end is random: on this synthetic course a single attempt succeeds about 75% of the time
+    # (15/20; failures are validated rejections: optimizer failure, MapBound or body-rate limit), so the
+    # suite flaked 4/10 with one attempt. mission_tracker plans 3 candidates and retries, so test the same
+    # policy: up to 3 attempts (Gate B configs: 19/20 per attempt).
+    codes = []
+    for _ in range(3):
+        code, log = run([PLANNER, cfg, "--out", out])
+        codes.append(code)
+        if code == 0:
+            break
     print("\n".join("    " + l for l in log.splitlines() if "checkpoint" in l or "total" in l))
-    check(code == 0, "two checkpoints (through the opening three times): plan succeeds")
+    check(all(c >= 0 and c != 139 for c in codes), "two checkpoints: no attempt crashed (exits %s)" % codes)
+    check(code == 0, "two checkpoints (through the opening three times): plan succeeds within 3 attempts (exits %s)" % codes)
     if code == 0:
         t = entry_times(read_csv(os.path.join(out, "path.csv")), [c1, c2])
         check(len(t) == 2, "two checkpoints: path.csv enters both boxes in order (t = %s)" % t)
