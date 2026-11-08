@@ -2,6 +2,7 @@
 """Run the real flight dashboard (flight/dash/dash.html) against a simulated flight, no drone needed.
 
     pixi run demo            # -> http://127.0.0.1:8099/?k=demo
+    python tools/dashboard_demo.py --still    # top-down shows only the wall the detour avoids
 
 The drone flies the dashboard planner's own detour (course_state.update_preview) around a wall
 placed across the course. Depth is rendered live from the drone's pose, the way the real worker
@@ -129,7 +130,9 @@ def state():
     s['course_run'] = dict(active=True, state='running', reason='Following the obstacle-adjusted route', progress=k / len(ROUTE),
                            controller='smooth_position', path_time_s=round(k * .0373, 2), duration_s=22.4, radius_m=7.,
                            route_source='adjusted', obstacle_guard=True)
-    if LIVE:
+    if STILL:
+        s['depth'].update(points=BLOCKING, view_polygon=[], age_s=.2, geometry_version='demo:still:live')
+    elif LIVE:
         s['depth'].update(points=[list(c) for c in LIVE['cells']], view_polygon=LIVE['fan'], camera_xy=[p[0], p[1]],
                           age_s=round(time.monotonic() - LIVE['at'], 2), geometry_version=f"demo:{LIVE['k']}:live")
     return s
@@ -157,7 +160,12 @@ class H(BaseHTTPRequestHandler):
         pass
 
 
+STILL = False
+BLOCKING = json.loads((HERE / 'demo' / 'blocking_wall.json').read_text())
+
 if __name__ == '__main__':
+    import sys
+    STILL = '--still' in sys.argv
     threading.Thread(target=depth_loop, daemon=True).start()
     print('dashboard demo: http://127.0.0.1:8099/?k=demo')
     ThreadingHTTPServer(('127.0.0.1', 8099), H).serve_forever()
