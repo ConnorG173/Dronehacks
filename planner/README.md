@@ -44,6 +44,7 @@ copy it to `../localizer/data/` to fly it. **Load course v3 + its mission**
 reproduces `config/course_v3.yaml`. Every upload and plan is kept under
 `out/web/<id>/plan-NNN/` (map, config, log, path). Localhost only; needs numpy,
 trimesh (+ CadQuery for STEP); three.js loads from unpkg.
+HTTP API, files and integration notes for other software: `web/README.md`.
 
 ## Build
 
