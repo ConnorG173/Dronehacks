@@ -11,6 +11,9 @@
 #                              path following's mission_tracker, a bag; pilot go; wait; land; loc_eval.py
 #   reset                      fresh world + PX4 (drone on the launch mark), then check_sim
 #   stop                       stop the loc/team windows and the bag recorder
+# Path following's candidate-2 profile (Gate B, sphere dilation 0.35, time_scale 1.0):
+#   COURSE=planner/config/course_v3_gateb.yaml PF_ARGS="mission_preset:=course time_scale:=1.0 \
+#     planner_overrides:=MaxVelMag=1.2@DilateShape=sphere@DilateRadius=0.35" bash tools/loc_dev/slot1.sh fly loc <name>
 # The tracker is path following's (branch path-following): copy path_following/ into the slot first.
 set -eo pipefail
 export SIM_ID=1
@@ -19,7 +22,8 @@ source "$REPO/sim/scripts/common.sh"
 DDS=/root/team/sim/dds/fastdds_udp.xml
 IN_C="source /opt/ros/humble/setup.bash && source /root/skybeta_ws/install/setup.bash && cd /root/team"
 RUNS=runs_loc
-COURSE=planner/config/course_v3.yaml
+COURSE=${COURSE:-planner/config/course_v3.yaml}   # e.g. COURSE=planner/config/course_v3_gateb.yaml
+PF_ARGS=${PF_ARGS:-}                               # extra path-following launch args (their flight profile)
 
 rtf() {  # Gazebo real-time factor now (runs below ~0.9 are invalid for timing/dynamics)
   GZ_PARTITION=sim1 timeout 5 gz topic -e -t /world/dronehacks_course/stats 2>/dev/null | grep -m1 real_time_factor | awk '{print $2}'
@@ -68,7 +72,7 @@ fly)
   tmux new-window -d -t "$TMUX_SESSION" -n team \
     "SIM_ID=1 bash $REPO/sim/scripts/competitor.sh team_path_following mission.launch.py allow_mode_request:=true \
        $POSE_ARGS course_config:=/root/team/$COURSE planner_binary:=/root/team/planner/build/gcopter_planner \
-       out_dir:=/root/team/$out/plan 2>&1 | tee $REPO/$out/launch.log; bash"
+       out_dir:=/root/team/$out/plan $PF_ARGS 2>&1 | tee $REPO/$out/launch.log; bash"
   dexec -d "$CONTAINER" bash -lc "$IN_C && ros2 bag record -s mcap -o /root/team/$out/bag \
     /sim/ground_truth/odom /visual_slam/tracking/odometry /visual_slam/status /team/odom_map /team/loc/status \
     /team/loc/fix /team/loc/matcher_status /team/loc/correction /team/mission/state /team/plan/path \

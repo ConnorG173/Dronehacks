@@ -197,6 +197,47 @@ def summarize(name, est: Track, gt: Track, cps, goal, vio: Track | None):
     return s, (est.t, eh, ev, ey, air)
 
 
+class Clearance:
+    """Horizontal distance from a course point to the nearest wall or net (course wall grid, 5 cm)."""
+
+    def __init__(self, config):
+        here = os.path.dirname(os.path.abspath(__file__))
+        sys.path.insert(0, os.path.join(here, "..", "src", "team_loc_matcher"))
+        from team_loc_matcher import wallgrid
+        g = wallgrid.build_from_files(None, config)
+        surf = g["wall"] | g["boundary"]
+        self.dist = wallgrid._dist_to(surf, g["res_m"])
+        self.res, self.o = g["res_m"], np.array([g["origin_x"], g["origin_y"]])
+
+    def __call__(self, xy):
+        ij = np.floor((np.asarray(xy, float)[:, :2] - self.o) / self.res).astype(np.int64)
+        ij = np.clip(ij, 0, np.array(self.dist.shape) - 1)
+        return self.dist[ij[:, 0], ij[:, 1]]
+
+
+def clearance_report(name, est: Track, gt: Track, clr: Clearance, tight_m=0.6):
+    """Errors where the true path is tight, and the clearance a tracker flying on `est` would have had.
+    In a run flown on ground truth (gt mode) the drone follows the plan; flying on `est` would have put it
+    at about gt - (est - gt), so that point's clearance is the predicted one. In a run flown on `est` (loc
+    mode) the true clearance itself is the answer (`gt_min`)."""
+    p, _ = gt.interp(est.t)
+    ok = np.isfinite(p[:, 0]) & airborne_mask(gt, est.t)
+    if not ok.any():
+        return {}
+    p, e = p[ok], est.p[ok]
+    c_gt = clr(p)
+    err = np.hypot(e[:, 0] - p[:, 0], e[:, 1] - p[:, 1])
+    mirrored = p[:, :2] - (e[:, :2] - p[:, :2])
+    c_pred = clr(mirrored)
+    tight = c_gt < tight_m
+    out = {"name": name, "gt_min": float(c_gt.min()), "pred_min": float(c_pred.min()),
+           "pred_below_0.29_frac": float(np.mean(c_pred < 0.29)), "n_tight": int(tight.sum())}
+    if tight.any():
+        out.update(tight_err_p50=float(np.median(err[tight])), tight_err_p95=float(np.percentile(err[tight], 95)),
+                   tight_err_max=float(err[tight].max()))
+    return out
+
+
 def read_course(path):
     """Checkpoint centres, Goal and StartPos from the planner's flat config."""
     cps, goal, start = [], None, None
@@ -303,6 +344,16 @@ def main():
     if vio is not None and len(vio):
         raw = anchor_with_gt(vio, gt)
         summary["vio_gt0"], series["vio_gt0"] = summarize("vio_gt0", raw, gt, cp_t, goal, None)
+    try:
+        clr = Clearance(a.config)
+        rows = []
+        if msgs[T_OUT]:
+            rows.append(clearance_report("odom_map", odom_track(msgs[T_OUT]), gt, clr))
+        if vio is not None and len(vio):
+            rows.append(clearance_report("vio_gt0", anchor_with_gt(vio, gt), gt, clr))
+        summary["clearance"] = rows
+    except Exception as ex:  # the clearance map is a bonus; never lose the main numbers
+        summary["clearance_error"] = repr(ex)
     with open(os.path.join(out, "summary.json"), "w") as f:
         json.dump(summary, f, indent=1, default=float)
     with open(os.path.join(out, "series.csv"), "w") as f:
@@ -323,6 +374,12 @@ def main():
               ", ".join("–" if c is None else f"{c['err_h']:.3f}" for c in s["checkpoints"]))
         if "status" in s:
             print(f"{k}: status {s.get('status_frac')} honesty {s['status']}")
+    for c in summary.get("clearance", []):
+        if c:
+            print(f"clearance {c['name']:9s}: true path min {c['gt_min']:.3f} m | if flown on it: min {c['pred_min']:.3f} m, "
+                  f"below 0.29 m {100*c['pred_below_0.29_frac']:.1f} % | error where tight (<0.6 m, n={c['n_tight']}): "
+                  f"p50 {c.get('tight_err_p50', float('nan')):.3f} p95 {c.get('tight_err_p95', float('nan')):.3f} "
+                  f"max {c.get('tight_err_max', float('nan')):.3f}")
     print(f"\nwrote {out}/summary.json, summary.md, series.csv")
 
 
