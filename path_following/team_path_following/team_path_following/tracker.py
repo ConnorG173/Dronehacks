@@ -33,6 +33,8 @@ class TrackerParams:
     v_max: float = 1.4        # m/s norm budget (interface cap minus margin)
     e0: float = 0.10          # m error with no slow-down
     e_span: float = 0.30      # m extra error that stops the clock
+    e0_along: float = 0.10    # m behind the reference with no slow-down (lag along the path; walls
+    e_span_along: float = 0.30  # care about cross-track, so these can be looser than e0 / e_span)
     taudot_max: float = 1.0   # max path-clock rate (1 = planned timing)
     taudot_acc: float = 1.0   # 1/s, max change of taudot per second
     k_yaw: float = 1.5        # 1/s yaw gain
@@ -86,7 +88,7 @@ class Tracker:
 
     def clock_target(self, e_cross, e_behind, speed_scale=1.0):
         p = self.p
-        slow = max(0.0, e_cross - p.e0) / p.e_span + max(0.0, e_behind - p.e0) / p.e_span
+        slow = max(0.0, e_cross - p.e0) / p.e_span + max(0.0, e_behind - p.e0_along) / p.e_span_along
         return min(max(1.0 - slow, 0.0), 1.0) * p.taudot_max * min(max(speed_scale, 0.0), 1.0)
 
     def step(self, dt, pos, yaw, speed_scale=1.0):

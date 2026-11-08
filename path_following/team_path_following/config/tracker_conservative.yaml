@@ -19,6 +19,8 @@ mission_tracker:
     tracker.ki: 0.0
     tracker.e0: 0.10
     tracker.e_span: 0.30
+    tracker.e0_along: 0.10           # pinned: the profile must not follow later default changes
+    tracker.e_span_along: 0.30
     tracker.taudot_max: 1.0
     tracker.taudot_acc: 1.0
     tracker.k_yaw: 1.5
