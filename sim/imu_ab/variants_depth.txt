@@ -1,0 +1,4 @@
+on_d200_a enable_imu_fusion:=True imu_qos_depth:=200
+true_d200_a enable_imu_fusion:=True imu_qos_depth:=200 gyro_noise_density:=0.000055 accel_noise_density:=0.0004 gyro_random_walk:=0.000001 accel_random_walk:=0.0001
+on_d200_b enable_imu_fusion:=True imu_qos_depth:=200
+true_d200_b enable_imu_fusion:=True imu_qos_depth:=200 gyro_noise_density:=0.000055 accel_noise_density:=0.0004 gyro_random_walk:=0.000001 accel_random_walk:=0.0001

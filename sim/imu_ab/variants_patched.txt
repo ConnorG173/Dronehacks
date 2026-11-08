@@ -1,0 +1,4 @@
+p_off enable_imu_fusion:=False
+p_on enable_imu_fusion:=True
+p_onx3 enable_imu_fusion:=True gyro_noise_density:=0.00073 accel_noise_density:=0.0056 gyro_random_walk:=0.00006 accel_random_walk:=0.009
+p_yaw90 enable_imu_fusion:=True imu_yaw:=1.5708

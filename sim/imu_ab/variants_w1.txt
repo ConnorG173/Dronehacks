@@ -1,0 +1,3 @@
+w1_a enable_imu_fusion:=True
+w1_b enable_imu_fusion:=True
+w1_c enable_imu_fusion:=True

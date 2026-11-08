@@ -1,0 +1,4 @@
+p_true enable_imu_fusion:=True gyro_noise_density:=0.000055 accel_noise_density:=0.0004 gyro_random_walk:=0.000001 accel_random_walk:=0.0001
+p_true2 enable_imu_fusion:=True gyro_noise_density:=0.00011 accel_noise_density:=0.0008 gyro_random_walk:=0.000004 accel_random_walk:=0.0004
+p_onrep enable_imu_fusion:=True
+p_lowrw enable_imu_fusion:=True gyro_random_walk:=0.000001 accel_random_walk:=0.0001

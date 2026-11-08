@@ -7,3 +7,4 @@ __pycache__/
 sim/gz/models/skybeta_base/
 sim/gz/models/skybeta_frame/
 recordings/
+vio_ws/

@@ -1,7 +1,12 @@
 # DroneHacks team copy of the organizers' sim/skybeta_sim.launch.py (github.com/Artash-N/skybeta) with cuVSLAM
 # IMU fusion ON, for an A/B test of VIO accuracy (sim/scripts/stack.sh uses it when VIO_IMU=1). Changes:
 #   * 'enable_imu_fusion': True and 'imu_frame': 'sim_imu'
-#   * static TF base_link -> sim_imu (identity: the Gazebo IMU sits at the x500 body origin, level)
+#   * static TF base_link -> sim_imu (identity: the Gazebo IMU is PX4's x500 imu_sensor, at the base_link origin
+#     with no <pose>, so it reports body FLU, specific force +9.8 z at rest, on sim time like the cameras)
+#   * IMU noise / rate as launch arguments: calibration_frequency defaults to the sensor's 250 Hz (cuVSLAM's
+#     default 200 is wrong for this sensor); noise densities default to cuVSLAM's (≈4.5x the sim's white
+#     noise: gyro 0.00087 rad/s, accel 0.0064 m/s^2 per sample at 250 Hz; the sim has no bias walk)
+#   * imu_roll/pitch/yaw: rotate the declared IMU frame (negative control: a wrong extrinsic must hurt)
 # Everything else is the organizers' file unchanged.
 """skybeta stack against Isaac Sim / Pegasus instead of the OAK-D.
 
@@ -224,6 +229,11 @@ def generate_launch_description():
             # it would be wrong in a way that looks like a tuning problem.
             'enable_imu_fusion': True,
             'imu_frame': 'sim_imu',
+            'calibration_frequency': ParameterValue(LaunchConfiguration('imu_frequency'), value_type=float),
+            'gyro_noise_density': ParameterValue(LaunchConfiguration('gyro_noise_density'), value_type=float),
+            'gyro_random_walk': ParameterValue(LaunchConfiguration('gyro_random_walk'), value_type=float),
+            'accel_noise_density': ParameterValue(LaunchConfiguration('accel_noise_density'), value_type=float),
+            'accel_random_walk': ParameterValue(LaunchConfiguration('accel_random_walk'), value_type=float),
             'base_frame': 'base_link',
             'map_frame': 'map',
             'odom_frame': 'odom',
@@ -317,10 +327,17 @@ def generate_launch_description():
 
     imu_tf = Node(
         package='tf2_ros', executable='static_transform_publisher', name='base_link_to_sim_imu',
-        arguments=['--frame-id', 'base_link', '--child-frame-id', 'sim_imu'],
+        arguments=['--roll', LaunchConfiguration('imu_roll'), '--pitch', LaunchConfiguration('imu_pitch'),
+                   '--yaw', LaunchConfiguration('imu_yaw'),
+                   '--frame-id', 'base_link', '--child-frame-id', 'sim_imu'],
     )
+    imu_args = [DeclareLaunchArgument(n, default_value=v) for n, v in (
+        ('imu_frequency', '250.0'), ('gyro_noise_density', '0.000244'), ('gyro_random_walk', '0.000019393'),
+        ('accel_noise_density', '0.001862'), ('accel_random_walk', '0.003'),
+        ('imu_roll', '0.0'), ('imu_pitch', '0.0'), ('imu_yaw', '0.0'))]
 
     return LaunchDescription([
+        *imu_args,
         imu_tf,
         namespace_arg, vehicle_id_arg,
         camera_x_arg, camera_z_arg,

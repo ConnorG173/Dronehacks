@@ -1,0 +1,65 @@
+--- a/isaac_ros_visual_slam/src/impl/visual_slam_impl.cpp
++++ b/isaac_ros_visual_slam/src/impl/visual_slam_impl.cpp
+@@ -16,6 +16,7 @@
+ // SPDX-License-Identifier: Apache-2.0
+ 
+ #include <algorithm>
++#include <cstdlib>
+ #include <memory>
+ #include <string>
+ #include <unordered_map>
+@@ -679,13 +680,31 @@
+ 
+   Stopwatch stopwatch_track;
+   // First we add all imu measurements received since the last update.
++  // DroneHacks fix: upstream 3.0-3.2.6 registered every IMU sample with the IMAGE timestamp
++  // (latest_ts), so cuVSLAM saw ~8 samples per frame at one instant and its IMU integration was
++  // garbage (fused VIO diverged within seconds). Register each sample at its own header stamp,
++  // strictly increasing and not after the image, as cuvslam.h requires.
++  // DH_IMU_DEBUG=1 (env) logs one line per frame: IMU counts, stamps vs the image, gaps, track status.
++  static int64_t last_registered_imu_ts = -1;
++  static const bool dh_debug = std::getenv("DH_IMU_DEBUG") != nullptr;
++  int n_imu_registered = 0, n_imu_skipped = 0;
++  int64_t first_imu_ts = -1, max_imu_gap = 0;
++  const int64_t prev_registered_imu_ts = last_registered_imu_ts;
+   for (const auto & imu_msg : imu_msgs) {
+     const auto imu_measurement = TocuVSLAMImuMeasurement(imu_msg);
+     const rclcpp::Time timestamp(imu_msg->header.stamp);
+     int64_t imu_ts = static_cast<int64_t>(timestamp.nanoseconds());
+     RCLCPP_DEBUG(node.get_logger(), "Using imu msg timestamp [%ld]", imu_ts);
++    if (imu_ts <= last_registered_imu_ts || imu_ts > latest_ts) {
++      n_imu_skipped++;
++      continue;
++    }
++    if (last_registered_imu_ts > 0) {max_imu_gap = std::max(max_imu_gap, imu_ts - last_registered_imu_ts);}
++    if (first_imu_ts < 0) {first_imu_ts = imu_ts;}
++    n_imu_registered++;
++    last_registered_imu_ts = imu_ts;
+     const CUVSLAM_Status status = CUVSLAM_RegisterImuMeasurement(
+-      cuvslam_handle, latest_ts, &imu_measurement);
++      cuvslam_handle, imu_ts, &imu_measurement);
+     if (status != CUVSLAM_SUCCESS) {
+       RCLCPP_WARN(node.get_logger(), "CUVSLAM has failed to register an IMU measurement");
+     }
+@@ -711,6 +730,21 @@
+   nvidia::isaac_ros::nitros::nvtxRangePopWrapper();
+   ssw_track.Stop();
+ 
++  if (dh_debug) {
++    const auto & t = vo_pose_estimate.pose.t;
++    RCLCPP_INFO(
++      node.get_logger(),
++      "DHIMU img %.4f prev_img %+.1fms | imu got %zu reg %d skip %d first %+.1fms last %+.1fms "
++      "maxgap %.1fms prevreg %+.1fms | status %d t (%.3f %.3f %.3f) track %.1fms",
++      latest_ts * 1e-9, last_track_ts > 0 ? (latest_ts - last_track_ts) / 1e6 : 0.0,
++      imu_msgs.size(), n_imu_registered, n_imu_skipped,
++      first_imu_ts > 0 ? (first_imu_ts - latest_ts) / 1e6 : 0.0,
++      last_registered_imu_ts > 0 ? (last_registered_imu_ts - latest_ts) / 1e6 : 0.0,
++      max_imu_gap / 1e6, prev_registered_imu_ts > 0 ? (prev_registered_imu_ts - latest_ts) / 1e6 : 0.0,
++      static_cast<int>(vo_status), vo_status == CUVSLAM_SUCCESS ? t[0] : 0.f,
++      vo_status == CUVSLAM_SUCCESS ? t[1] : 0.f, vo_status == CUVSLAM_SUCCESS ? t[2] : 0.f,
++      stopwatch_track.Seconds() * 1e3);
++  }
+   if (vo_status == CUVSLAM_TRACKING_LOST) {
+     pose_cache.Reset();
+     RCLCPP_WARN(node.get_logger(), "Visual tracking is lost");
