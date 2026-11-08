@@ -126,10 +126,42 @@ landing → landed → done.
 
 ## Gazebo slot 0 (`path_following/sim/slot0.sh`)
 
-**Status 13:00 PST: no valid Gazebo tracking result yet, because the sim's VIO is broken.** In slot 0, cuVSLAM
-publishes `/visual_slam/tracking/odometry` at ~25 Hz but its position is exactly (0, 0, 0) for the whole
-flight (`tools/vio_check.py`), so PX4's EKF2 and its velocity loop fly on a wrong estimate. Reported to the
-coordinator. What the runs did establish:
+**Status 16:15 PST: cameras fixed (5e8f6f8); VIO tracks for 26 s, then breaks at the C2a window.** The cameras
+had rendered saturated white (the course OBJ had no vertex normals; fixed by the coordinator). Mono images now
+have mean 43 and std 13. Results before 5e8f6f8 (gt02–gt06) flew on a frozen VIO and are invalid as tracking
+results.
+
+VIO vs ground truth (`tools/vio_err.py`, VIO aligned at takeoff = what a tracker with a perfect launch pose sees):
+
+| run | mode | speed | VIO error to 26 s | at the C2a window (≈26–28 s) | outcome |
+|---|---|---|---|---|---|
+| gt10 | gt | 1.0, default lag | < 0.05 m, scale 0.99 | +0.29 m jump in x, then steady | done, 5/5, 0 touches, course 22.0 s (plan 17.4), max xt 0.18, min clear 0.25 |
+| gt11 | gt | 1.0, sim lag | < 0.05 m | diverges to 28 m (VIO path 68 m vs 18 m) | PX4 flew on it: 1 touch, max xt 1.03 |
+| vio10 | vio | 1.0, sim lag | < 0.05 m | jump (−7.8, 0, −3.9) m, then a constant offset | tracker held, 8 m "off path", until timeout |
+
+- gt mode still depends on cuVSLAM, because PX4's EKF2 fuses it. When VIO breaks, gt runs break too.
+- The dark tunnel (checkpoint 4) is passed with VIO error < 5 cm. The failure is at the window in the turned
+  wall. Likely the wall fills the stereo view on approach (texture, or the near clip), then the view jumps
+  once through the window. Reported; worth checking on the real drone's OAK view too.
+- PX4 velocity loop through the interface (gt10, `tools/fit_lag.py`): tau_v 0.66 s, dead time 0.24 s
+  (first order), second order overdamped (ζ ≈ 4.5) with dead time 0.12 s, steady-state gain 1.06.
+  Kinsim with a 0.14 s link delay reproduces that fit (tau 0.63, d 0.24). On that plant, tracker lag
+  assumptions (course v3, plan 17.03 s):
+
+  | tracker tau / d | speed 1.0: course s, max xt, min clear, cp | plan ×0.85 (faster) |
+  |---|---|---|
+  | 0.55 / 0.10 (default) | 18.36, 0.153, 0.20, 4/5 | 16.86, 0.161, 0.25, 5/5 |
+  | 0.66 / 0.24 (fit) | 17.06, 0.180, 0.30, 5/5 | 15.80, 0.218, 0.27, 4/5 |
+  | **0.66 / 0.18** | 17.06, 0.162, 0.30, 5/5 | **15.60, 0.190, 0.335, 5/5** |
+  | 0.60 / 0.30 | 17.24, 0.183, 0.30, 5/5 | 16.38, 0.223, 0.25, 4/5 |
+  | 0.75 / 0.24 | 17.12, 0.212, 0.29, 4/5 | 17.46, 0.264, 0.25, 4/5 |
+
+  `config/tracker_sim_x500.yaml` is now 0.66 / 0.18. Under-estimating the lag (the default) costs about 1.3 s,
+  through the path clock slowing on cross-track error. That's the slow 22.0 s course in gt10.
+- Checkpoint scoring now skips a missed box instead of stopping the count (`course.score_checkpoints`).
+  A 2 cm miss of box 1 used to score 0/5.
+
+Earlier findings (still valid):
 
 - The chain works end to end: plan at startup (best of 3, ~10 s in the container), zero twists until the
   pilot's go, Offboard, takeoff, course start (gt02–gt05).
