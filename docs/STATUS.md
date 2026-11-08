@@ -17,6 +17,12 @@ Candidate 3 (path-following 5d62099) targets that one spot.
 - Plan: 24.4 s. Kinematic sim: min clearance 0.316 m.
 - Runs: le1–le3 in slot 0 and c3rep1–3 in slot 2 (`~/rep3_runs.log`). Their verdicts were pending when the sim was paused.
 
+**Update 02:40 UTC: `drone-fast-v1` (candidate 3) Gazebo run le2 was strict-clean:**
+- 28.0 s by the same course measure as candidate 2's 25.2 s (22.7 s on the node's own clock);
+- 0 touches at 0.29 m, min clearance 0.30 m, 5/5 openings, landed in the pad.
+
+le1 and le3 were void: the sim's `pilot.py go` never armed. That arming flake hit 2 of 3 resets and needs fixing before the next sim session.
+
 ## What to fly on the drone (ready)
 Justin accepted 0.25 m clearance as the bar (the strict 0.29 m was over-conservative), so the fast profile is frozen.
 
