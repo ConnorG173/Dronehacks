@@ -47,6 +47,12 @@ esac
 SRC="${2:-oak}"
 [[ "$SRC" == oak || "$SRC" == px4 ]] || { echo "source must be oak or px4"; exit 1; }
 [[ -f "$HOSTKIT/calib.json" ]] || { echo "no calib.json (see RUNBOOK step 0)"; exit 1; }
+# The PATCHED node (build_vslam.sh): the stock 3.2.6 binary's IMU fusion is broken (IMU-timestamp bug).
+VSLAM_BIN=$KIT/vio_ws/install/isaac_ros_visual_slam/lib/isaac_ros_visual_slam/isaac_ros_visual_slam
+VSLAM_LIB=$KIT/vio_ws/install/isaac_ros_visual_slam/lib
+if [[ "${STOCK:-0}" == 1 ]]; then VSLAM_BIN=/opt/ros/humble/lib/isaac_ros_visual_slam/isaac_ros_visual_slam; VSLAM_LIB=/opt/ros/humble/lib
+elif [[ ! -f "$HOSTKIT/vio_ws/install/isaac_ros_visual_slam/lib/isaac_ros_visual_slam/isaac_ros_visual_slam" ]]; then
+  echo "patched cuVSLAM not built: run build_vslam.sh first (STOCK=1 forces the stock, IMU-broken binary)"; exit 1; fi
 # preconditions (disarmed + landed + fresh telemetry), checked inside the container
 dx "python3 $KIT/team_imu_log.py --check" || { echo "REFUSING to start: preconditions failed"; exit 1; }
 stop_all
@@ -65,8 +71,8 @@ dxd "exec python3 -u $KIT/team_imu_prep.py $SRC --calib $KIT/calib.json > $KIT/$
 dxd "exec /opt/ros/humble/lib/tf2_ros/static_transform_publisher --x $TX --y $TY --z $TZ --qx $QX --qy $QY --qz $QZ --qw $QW \
   --frame-id base_link --child-frame-id team_imu_frame --ros-args -r __node:=team_imu_tf > $KIT/$LOG/tf.log 2>&1"
 sleep 2
-dxd "export LD_LIBRARY_PATH=/opt/ros/humble/share/isaac_ros_gxf/gxf/lib/serialization:\$LD_LIBRARY_PATH; \
- exec nice -n 10 /opt/ros/humble/lib/isaac_ros_visual_slam/isaac_ros_visual_slam --ros-args \
+dxd "export LD_LIBRARY_PATH=$VSLAM_LIB:/opt/ros/humble/share/isaac_ros_gxf/gxf/lib/serialization:\$LD_LIBRARY_PATH; \
+ exec nice -n 10 $VSLAM_BIN --ros-args \
   -r __node:=team_imu_vio -r __ns:=/team_imu \
   -r visual_slam/image_0:=/oak/left/image_mono -r visual_slam/camera_info_0:=/oak/left/camera_info \
   -r visual_slam/image_1:=/oak/right/image_mono -r visual_slam/camera_info_1:=/oak/right/camera_info \
@@ -86,3 +92,6 @@ sleep 10
 echo "shadow up ($SRC IMU), logs in $HOSTKIT/$LOG"
 grep -aE "Enable IMU Fusion|frequency|noise|ERROR|rror" "$HOSTKIT/$LOG/vslam.log" | head -8
 tail -2 "$HOSTKIT/$LOG/prep.log"
+P=$(docker exec "$C" pgrep -f "__node:=team_imu_vio" | head -1)
+echo "shadow cuVSLAM pid $P loads: $(docker exec "$C" bash -c "grep -o '/[^ ]*libvisual_slam_node.so' /proc/$P/maps 2>/dev/null | sort -u")" \
+  | tee -a "$HOSTKIT/$LOG/config.txt"

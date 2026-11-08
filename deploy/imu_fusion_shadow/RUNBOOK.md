@@ -25,7 +25,31 @@ and none of it is touched: no launch is stopped or restarted, and no parameter, 
 | `team_imu_log.py` | read-only logger and guard: flight VIO raw and levelled, shadow, PX4 attitude → `logs/<stamp>/track.jsonl` |
 | `analyze.py` | scores a log: loop closure (position and yaw), tilt vs PX4, rates, dropouts |
 | `calib_check.py` | read-only IMU→camera rotation, time offset and accel scale, measured against the flight VIO (hand rotation) |
+| `build_vslam.sh`, `vslam_src.tgz` | build the patched cuVSLAM (IMU timestamp fix) into `./vio_ws` |
 | `calib.json` | IMU rotation, translation and accel scale. Seeded from the teammates' `~/team_ws/claude/imu_calib.json` (copied, not linked) |
+
+## Step 0b: build the patched cuVSLAM (ASK FIRST: CPU for ~6-10 min; drone landed, disarmed)
+
+The stock Isaac ROS 3.2.6 node cannot fuse the IMU: it registers every IMU sample with the camera frame's
+timestamp (`visual_slam_impl.cpp`, `UpdatePose`), so cuVSLAM sees ~8 samples per frame at one instant, and
+fused VIO diverges. Gazebo replay on identical input: 4.6 m error with fusion vs 2 cm without.
+`vslam_src.tgz` is the exact 3.2.6 source (tag `v3.2-15`) with the one-line fix
+(`vio/patches/isaac_ros_visual_slam-3.2.6-imu-timestamps.patch` on branch `imu-fusion`).
+
+```bash
+bash ~/team_ws/team_staging/imu_fusion/build_vslam.sh     # refuses unless disarmed + landed; nice 19, 2 cores
+```
+
+It builds into `./vio_ws` only, and the flight cuVSLAM keeps the stock binary. `shadow.sh start` refuses to run
+without this build (`STOCK=1` overrides, for a broken-on-purpose comparison only). After start, `config.txt`
+in the log dir shows which `libvisual_slam_node.so` the shadow loaded; it must be under `vio_ws`.
+
+Sim status, so the bench result is read in context:
+- with the fix, fused VIO no longer diverges on every run;
+- it is still not better than vision-only in Gazebo (0.085 m vs 0.020 m on a 12 s window), and it is
+  sensitive to start-up timing (some full replays still diverge);
+- the sim's vision-only VIO is already near perfect (yaw drift 0.1° over 1200°), so only the drone can show
+  whether fusion removes the real drift.
 
 ## Step 0: preconditions (read-only, no permission needed)
 

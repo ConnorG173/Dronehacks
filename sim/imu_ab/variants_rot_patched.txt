@@ -1,0 +1,25 @@
+base_off enable_imu_fusion:=False
+r00 enable_imu_fusion:=True imu_roll:=0.000000 imu_pitch:=-0.000000 imu_yaw:=0.000000
+r01 enable_imu_fusion:=True imu_roll:=3.141593 imu_pitch:=-0.000000 imu_yaw:=0.000000
+r02 enable_imu_fusion:=True imu_roll:=3.141593 imu_pitch:=-0.000000 imu_yaw:=3.141593
+r03 enable_imu_fusion:=True imu_roll:=0.000000 imu_pitch:=-0.000000 imu_yaw:=3.141593
+r04 enable_imu_fusion:=True imu_roll:=-1.570796 imu_pitch:=-0.000000 imu_yaw:=0.000000
+r05 enable_imu_fusion:=True imu_roll:=1.570796 imu_pitch:=-0.000000 imu_yaw:=0.000000
+r06 enable_imu_fusion:=True imu_roll:=1.570796 imu_pitch:=-0.000000 imu_yaw:=3.141593
+r07 enable_imu_fusion:=True imu_roll:=-1.570796 imu_pitch:=-0.000000 imu_yaw:=3.141593
+r08 enable_imu_fusion:=True imu_roll:=3.141593 imu_pitch:=-0.000000 imu_yaw:=1.570796
+r09 enable_imu_fusion:=True imu_roll:=0.000000 imu_pitch:=-0.000000 imu_yaw:=-1.570796
+r10 enable_imu_fusion:=True imu_roll:=0.000000 imu_pitch:=-0.000000 imu_yaw:=1.570796
+r11 enable_imu_fusion:=True imu_roll:=3.141593 imu_pitch:=-0.000000 imu_yaw:=-1.570796
+r12 enable_imu_fusion:=True imu_roll:=0.000000 imu_pitch:=-1.570796 imu_yaw:=0.000000
+r13 enable_imu_fusion:=True imu_roll:=0.000000 imu_pitch:=1.570796 imu_yaw:=0.000000
+r14 enable_imu_fusion:=True imu_roll:=0.000000 imu_pitch:=1.570796 imu_yaw:=0.000000
+r15 enable_imu_fusion:=True imu_roll:=0.000000 imu_pitch:=-1.570796 imu_yaw:=0.000000
+r16 enable_imu_fusion:=True imu_roll:=1.570796 imu_pitch:=-0.000000 imu_yaw:=1.570796
+r17 enable_imu_fusion:=True imu_roll:=-1.570796 imu_pitch:=-0.000000 imu_yaw:=-1.570796
+r18 enable_imu_fusion:=True imu_roll:=-1.570796 imu_pitch:=-0.000000 imu_yaw:=1.570796
+r19 enable_imu_fusion:=True imu_roll:=1.570796 imu_pitch:=-0.000000 imu_yaw:=-1.570796
+r20 enable_imu_fusion:=True imu_roll:=0.000000 imu_pitch:=1.570796 imu_yaw:=0.000000
+r21 enable_imu_fusion:=True imu_roll:=0.000000 imu_pitch:=-1.570796 imu_yaw:=0.000000
+r22 enable_imu_fusion:=True imu_roll:=0.000000 imu_pitch:=-1.570796 imu_yaw:=0.000000
+r23 enable_imu_fusion:=True imu_roll:=0.000000 imu_pitch:=1.570796 imu_yaw:=0.000000
