@@ -6,6 +6,7 @@ treats that as the go signal and enters Offboard once. This does the same in sim
 
     python3 sim/pilot.py --sim 0 go        # wait for a position estimate, arm, switch to Position
     python3 sim/pilot.py --sim 0 land      # PX4 Land mode (the pilot's abort)
+    python3 sim/pilot.py --sim 0 go_offboard  # drone-12 dashboard style: Offboard while disarmed, then arm
     python3 sim/pilot.py --sim 0 kill      # disarm immediately (the kill switch; only on the ground!)
     python3 sim/pilot.py --sim 0 status    # mode, armed
 --sim N talks to PX4 instance N on its own GCS port (18570 + N), so two sims never cross.
@@ -16,7 +17,7 @@ import time
 
 from pymavlink import mavutil
 
-PX4_MAIN_MODE = {"altitude": 2, "position": 3}
+PX4_MAIN_MODE = {"altitude": 2, "position": 3, "offboard": 6}
 
 
 def connect(sim_id, timeout=30):
@@ -98,7 +99,7 @@ def main():
     sim_id = 0
     if len(args) >= 2 and args[0] == "--sim":
         sim_id, args = int(args[1]), args[2:]
-    if len(args) != 1 or args[0] not in ("go", "land", "kill", "status"):
+    if len(args) != 1 or args[0] not in ("go", "go_offboard", "land", "kill", "status"):
         sys.exit(__doc__)
     m = connect(sim_id)
     what = args[0]
@@ -121,6 +122,18 @@ def main():
         time.sleep(0.5)
         if not ensure_mode(m, PX4_MAIN_MODE["position"], "POSCTL", also_ok=("OFFBOARD",)):
             sys.exit("PX4 never switched to Position")
+        status(m)
+    elif what == "go_offboard":
+        # drone 12 now: the dashboard's grounded selector puts PX4 in Offboard, then the pilot arms in Offboard.
+        if not wait_position_valid(m):
+            sys.exit("EKF never reported a valid position")
+        if not ensure_mode(m, PX4_MAIN_MODE["offboard"], "OFFBOARD"):
+            sys.exit("PX4 never switched to Offboard (is the flight interface streaming its heartbeat?)")
+        t0 = time.time()
+        while not command(m, mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM, 1):
+            if time.time() - t0 > 90:
+                sys.exit("arming refused for 90 s")
+            time.sleep(2)
         status(m)
     elif what == "land":
         command(m, mavutil.mavlink.MAV_CMD_NAV_LAND)
