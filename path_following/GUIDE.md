@@ -61,6 +61,12 @@ bash sim/gcp/vm.sh 0 'LAUNCH=conservative.launch.py bash path_following/sim/slot
   - PX4 lag fit
   - VIO error vs ground truth
 - Reset between runs. Gazebo needs about 2.5 min to load textures.
+- **Check the real-time factor.** Every run logs Gazebo's RTF during the flight (`rtf_summary.txt`) and
+  flags RTF < 0.9 as invalid for timing. With three sims on the 16-vCPU VM, slot 0 dropped to 0.19×
+  real time, and course times and lag fits doubled. In slot 0, `mission_tracker` now runs on sim time
+  (`tracker_use_sim_time:=true`, the slot0.sh default, `SIM_TIME=false` to disable), so a slow sim
+  stretches wall time instead of faking lag. The flight interface stays on wall time; on the drone,
+  everything is wall time.
 - Gate B in Gazebo so far: vio20 was clean (0 touches, 6/7 checkpoints, VIO error 2.4 cm RMS). vio21
   failed: cuVSLAM jumped 9.5 m at liftoff. The node now has a pose jump guard (`pose_jump_m`). On a jump
   it aborts: in flight it descends slowly in place, on the pad it never takes off.

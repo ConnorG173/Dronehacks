@@ -161,6 +161,20 @@ VIO vs ground truth (`tools/vio_err.py`, VIO aligned at takeoff = what a tracker
 - Checkpoint scoring now skips a missed box instead of stopping the count (`course.score_checkpoints`).
   A 2 cm miss of box 1 used to score 0/5.
 
+### Gate B route (`course_v3_gateb.yaml`), raw VIO, evening 2026-11-07
+
+| run | profile | course s (plan) | touches | ckpts | max xt / min clear | VIO rms | note |
+|---|---|---|---|---|---|---|---|
+| vio20 | sim lag 0.66/0.18, ts 1.0 | 25.5 (19.3) | 0 | 6/7 (via 6 -12 cm) | 0.18 / 0.22 | 2.4 cm | clean; clock ~0.75 (along-track lag) |
+| vio21 | same | — | 1 | 0/7 | — | diverged | cuVSLAM jumped 9.5 m at liftoff → pose jump guard added |
+| cons03 | `conservative.launch.py` (ts 1.4) | 55.0 (27.3) | 0 | 6/7 (via) | 0.175 / 0.30 | 2.4 cm | **RTF starved** (VM overloaded): timing invalid |
+| tune01 | lag 0.78/0.26, ts 1.4 | 47.7 (25.8) | 1 (clear 0.10) | 6/7 | 0.20 / 0.10 | 2.1 cm | **RTF starved**: timing and lag fit invalid |
+
+The trailing and the rising lag fits (0.66 → 0.78 → 0.89 s) after about 01:20 UTC came from Gazebo
+running at 0.19× real time in slot 0 (three sims on 16 vCPUs). The node ran on wall time, so the drone
+looked late. Fixed by RTF logging per run and `tracker_use_sim_time` in the sim. The VM is moving to
+32 vCPU.
+
 Earlier findings (still valid):
 
 - The chain works end to end: plan at startup (best of 3, ~10 s in the container), zero twists until the
