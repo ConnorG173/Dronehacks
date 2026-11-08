@@ -6,29 +6,37 @@
 <title>Course Planner</title>
 <style>
   :root {
-    --bg: #0f1216; --panel: #171b21; --line: #2a3039; --text: #e6e9ee; --muted: #8b95a3;
-    --accent: #4fa3ff; --start: #3ccf7a; --cp: #ffae3d; --goal: #ff5a5f; --err: #ff6b6b;
+    --bg: #0b0e13; --panel: #12161d; --card: #171c24; --line: #252c37; --line2: #313a47;
+    --text: #e8ecf2; --muted: #8a94a3; --accent: #5aa9ff; --accent2: #7c6cff;
+    --start: #3ccf7a; --cp: #ffae3d; --goal: #ff5a5f; --err: #ff6b6b; --ok: #3ccf7a;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
-    font: 13px/1.4 system-ui, -apple-system, Segoe UI, sans-serif; }
+    font: 13px/1.45 Inter, system-ui, -apple-system, Segoe UI, sans-serif; -webkit-font-smoothing: antialiased; }
   #app { display: flex; height: 100%; }
-  #side { width: 380px; flex: none; overflow-y: auto; background: var(--panel);
-    border-right: 1px solid var(--line); padding: 12px 14px 40px; }
+  #side { width: 390px; flex: none; overflow-y: auto; background: var(--panel);
+    border-right: 1px solid var(--line); padding: 16px 16px 48px; scrollbar-width: thin; scrollbar-color: #2b333f transparent; }
   #view { flex: 1; position: relative; min-width: 0; }
   #view canvas { display: block; }
-  h1 { font-size: 15px; margin: 2px 0 10px; }
-  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
-    margin: 18px 0 8px; border-top: 1px solid var(--line); padding-top: 12px; }
+  h1 { font-size: 17px; margin: 0 0 4px; letter-spacing: -.01em; display: flex; align-items: center; gap: 9px; }
+  h1::before { content: ""; width: 22px; height: 22px; border-radius: 6px; flex: none;
+    background: linear-gradient(135deg, var(--accent), var(--accent2)); box-shadow: 0 0 18px #5aa9ff55; }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600;
+    margin: 22px 0 10px; display: flex; align-items: center; gap: 8px; }
+  h2::after { content: ""; flex: 1; height: 1px; background: var(--line); }
   label { color: var(--muted); }
   input[type=number], input[type=text], select {
-    background: #0f1216; color: var(--text); border: 1px solid var(--line); border-radius: 4px;
-    padding: 3px 5px; font: inherit; width: 100%; min-width: 0; }
+    background: #0d1117; color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+    padding: 4px 7px; font: inherit; width: 100%; min-width: 0; transition: border-color .15s, box-shadow .15s; }
+  input:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px #5aa9ff22; }
   input[type=number] { font-variant-numeric: tabular-nums; }
-  button { background: #222831; color: var(--text); border: 1px solid var(--line); border-radius: 5px;
-    padding: 5px 9px; font: inherit; cursor: pointer; }
-  button:hover { border-color: #46505d; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #06121f; font-weight: 600; }
+  button { background: #1c222b; color: var(--text); border: 1px solid var(--line2); border-radius: 7px;
+    padding: 6px 10px; font: inherit; cursor: pointer; transition: background .15s, border-color .15s, transform .05s; }
+  button:hover { border-color: #4a5566; background: #222a35; }
+  button:active { transform: translateY(1px); }
+  button.primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); border: 0; color: #fff;
+    font-weight: 600; padding: 9px 12px; font-size: 14px; box-shadow: 0 4px 18px #5a8cff33; }
+  button.primary:hover { filter: brightness(1.08); }
   button.on { outline: 2px solid var(--accent); outline-offset: 1px; }
   button:disabled { opacity: .45; cursor: default; }
   .row { display: flex; gap: 6px; align-items: center; margin: 5px 0; }
@@ -36,21 +44,58 @@
   .row > label { flex: 0 0 120px; }
   .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
   .muted { color: var(--muted); }
-  .wp { border: 1px solid var(--line); border-radius: 6px; padding: 6px 7px; margin: 6px 0; }
+  .wp { border: 1px solid var(--line); background: var(--card); border-radius: 9px; padding: 8px 9px; margin: 7px 0; }
   .wp .head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
   .wp .head b { flex: 1; }
   .wp .head button { padding: 1px 6px; }
   .tag { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
   .small { font-size: 11px; }
-  pre { background: #0b0e11; border: 1px solid var(--line); border-radius: 5px; padding: 7px;
+  pre { background: #0a0d12; border: 1px solid var(--line); border-radius: 8px; padding: 8px;
     overflow-x: auto; font-size: 11px; white-space: pre; max-height: 320px; }
   #status { margin: 8px 0; min-height: 18px; }
   #status.err { color: var(--err); }
   details summary { cursor: pointer; color: var(--muted); margin: 6px 0; }
   a { color: var(--accent); }
-  #hud { position: absolute; left: 10px; top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
-  #hint { position: absolute; left: 50%; transform: translateX(-50%); bottom: 14px; background: #000a;
-    padding: 6px 12px; border-radius: 6px; pointer-events: none; display: none; }
+  #hud { position: absolute; left: 12px; top: 12px; display: flex; gap: 6px; flex-wrap: wrap; }
+  #hud button, #legend, #play, #hint, #inspect, #runBadge { backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+  #hud button { background: #11161dcc; }
+  /* ---- live planning status ---- */
+  #progress { display: none; margin: 10px 0; background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; padding: 12px; }
+  #progress .top { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; }
+  #progress .top b { flex: 1; font-size: 13px; }
+  #progress .clock { font-variant-numeric: tabular-nums; color: var(--muted); }
+  .spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid #5aa9ff33; border-top-color: var(--accent);
+    animation: spin .8s linear infinite; flex: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .steps { list-style: none; margin: 0; padding: 0; }
+  .steps li { position: relative; padding: 0 0 11px 26px; color: var(--muted); }
+  .steps li::before { content: ""; position: absolute; left: 4px; top: 3px; width: 10px; height: 10px; border-radius: 50%;
+    border: 2px solid var(--line2); background: var(--panel); }
+  .steps li::after { content: ""; position: absolute; left: 10px; top: 17px; bottom: 1px; width: 2px; background: var(--line); }
+  .steps li:last-child::after { display: none; }
+  .steps li.done { color: var(--text); }
+  .steps li.done::before { background: var(--ok); border-color: var(--ok); }
+  .steps li.done::after { background: #3ccf7a55; }
+  .steps li.active { color: var(--text); font-weight: 600; }
+  .steps li.active::before { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 0 4px #5aa9ff33;
+    animation: pulse 1.2s ease-in-out infinite; }
+  .steps li.failed::before { background: var(--err); border-color: var(--err); }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 7px #5aa9ff11; } }
+  .steps .sub { display: block; font-weight: 400; color: var(--muted); font-size: 11px; margin-top: 1px; }
+  .bar { height: 4px; background: #232a34; border-radius: 3px; overflow: hidden; margin-top: 5px; }
+  .bar > i { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2));
+    border-radius: 3px; transition: width .3s; }
+  .chips { display: flex; gap: 5px; flex-wrap: wrap; margin: 2px 0 8px; }
+  .chip { font-size: 11px; padding: 2px 7px; border-radius: 10px; border: 1px solid var(--line2); color: var(--muted); }
+  .chip.ok { color: var(--ok); border-color: #3ccf7a66; } .chip.bad { color: var(--err); border-color: #ff6b6b66; }
+  .chip.run { color: var(--accent); border-color: #5aa9ff66; }
+  #progress pre { max-height: 130px; margin: 6px 0 0; color: #9fb0c4; }
+  #runBadge { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); display: none; align-items: center;
+    gap: 9px; background: #11161dd9; border: 1px solid var(--line2); padding: 7px 14px; border-radius: 20px;
+    font-weight: 600; box-shadow: 0 6px 24px #0008; }
+  #hint { position: absolute; left: 50%; transform: translateX(-50%); bottom: 14px; background: #11161dd9;
+    border: 1px solid var(--line2); padding: 7px 14px; border-radius: 20px; pointer-events: none; display: none; }
   #legend { position: absolute; right: 10px; top: 10px; background: #000a; padding: 6px 9px;
     border-radius: 6px; font-size: 11px; display: none; }
   #legend .bar { width: 140px; height: 8px; border-radius: 3px;
@@ -128,6 +173,7 @@
     </details>
     <div class="row"><button id="plan" class="primary" disabled>Plan path</button></div>
     <div id="status"></div>
+    <div id="progress"></div>
     <div id="result"></div>
 
     <h2>View</h2>
@@ -135,6 +181,7 @@
     <div class="row"><label>X-ray walls</label><input type="checkbox" id="xray" style="flex:0"></div>
     <div class="row"><label>Show map bound</label><input type="checkbox" id="showBound" style="flex:0" checked></div>
     <div class="row"><label>Keep-out sphere</label><input type="checkbox" id="showKor" style="flex:0" checked></div>
+    <div class="row"><label>RRT search routes</label><input type="checkbox" id="showRoutes" style="flex:0" checked></div>
     <div class="muted small">With no placing mode active, click on the path to inspect a point: position, time,
       speed and the shortest distance to the net and to the nearest obstacle (lines show where to). Esc clears it.</div>
   </div>
@@ -145,6 +192,7 @@
     <div id="play"><button id="playBtn">▶</button><input type="range" id="tSlider" min="0" max="1" step="0.001" value="0"><span id="tInfo"></span></div>
     <div id="hint"></div>
     <div id="inspect"></div>
+    <div id="runBadge"><span class="spin"></span><span id="runText">Planning…</span></div>
   </div>
 </div>
 
@@ -214,6 +262,7 @@ let courseGroup = null;
 
 const markers = new THREE.Group(); scene.add(markers);
 const pathGroup = new THREE.Group(); scene.add(pathGroup);
+const routeGroup = new THREE.Group(); scene.add(routeGroup);   // RRT route per leg, drawn as the planner finds them
 const inspectGroup = new THREE.Group(); scene.add(inspectGroup);  // clicked path point + distance lines
 const boundBox = new THREE.Box3Helper(new THREE.Box3(), 0x5c6675); scene.add(boundBox);
 
@@ -512,7 +561,28 @@ function redraw() {
 $("hover").oninput = $("heading").oninput = redraw;
 
 // ---------- planning ----------
+// ---------- RRT search routes (live from /api/progress, then from the result) ----------
+const LEG_COLORS = [0x4dd8ff, 0xb48cff, 0xff8fd0, 0x7dffb0, 0xffd36b, 0x8fb4ff];
+let routesShown = 0, routesAttempt = -1;
+function drawRoutes(routes, attempt) {
+  if (attempt !== routesAttempt) { clearGroup(routeGroup); routesShown = 0; routesAttempt = attempt; }
+  for (let k = routesShown; k < (routes || []).length; k++) {
+    const pts = routes[k].map(q => new THREE.Vector3(q[0], q[1], q[2])), color = LEG_COLORS[k % LEG_COLORS.length];
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
+      new THREE.LineDashedMaterial({ color, dashSize: 0.1, gapSize: 0.06, depthTest: false, transparent: true, opacity: 0.9 }));
+    line.computeLineDistances(); line.renderOrder = 5; routeGroup.add(line);
+    const dots = new THREE.Points(new THREE.BufferGeometry().setFromPoints(pts),   // RRT nodes on the route
+      new THREE.PointsMaterial({ color, size: 6, sizeAttenuation: false, depthTest: false }));
+    dots.renderOrder = 5; routeGroup.add(dots);
+    routeGroup.add(label(`leg ${k + 1}`, pts[Math.floor(pts.length / 2)].clone().add(new THREE.Vector3(0, 0, 0.12))));
+  }
+  routesShown = (routes || []).length;
+  routeGroup.visible = $("showRoutes").checked;
+}
+$("showRoutes").onchange = () => { routeGroup.visible = $("showRoutes").checked; };
+
 function clearPath() {
+  clearGroup(routeGroup); routesShown = 0; routesAttempt = -1;
   clearGroup(pathGroup); clearInspect(); S.path = null; drone.visible = korSphere.visible = false;
   $("legend").style.display = $("play").style.display = "none";
   $("result").innerHTML = "";
@@ -529,14 +599,63 @@ $("plan").onclick = async () => {
     planner: { maxVel: num("maxVel"), timeoutRRT: num("timeoutRRT"), tries: num("tries") },
   };
   clearPath();
-  $("plan").disabled = true;
-  status(`Building map and planning (up to ${req.planner.tries} attempts)…`);
+  $("plan").disabled = true; $("plan").textContent = "Planning…";
+  status("");
+  const poll = setInterval(pollProgress, 450); pollProgress();
   try {
     const res = await (await api("/api/plan", { method: "POST", body: JSON.stringify(req) })).json();
+    clearInterval(poll); await pollProgress(true, res.ok);
     showResult(res);
-  } catch (e) { status("Planning request failed: " + e.message, true); }
-  $("plan").disabled = false;
+  } catch (e) { clearInterval(poll); hideProgress(); status("Planning request failed: " + e.message, true); }
+  $("plan").disabled = false; $("plan").textContent = "Plan path";
 };
+
+// ---------- live planning status (GET /api/progress) ----------
+const STAGES = [
+  ["map", "Build occupancy map", "sample course surfaces into map points"],
+  ["route", "Search routes (RRT)", "collision-free route for each leg"],
+  ["corridor", "Build safe corridor", "convex polytopes around each leg"],
+  ["optimize", "Optimize trajectory", "GCOPTER: minimum time within limits"],
+  ["validate", "Validate", "1 ms samples: walls, speed, tilt, thrust"],
+  ["clearance", "Measure clearance", "distance to the course along the path"],
+];
+const ORDER = { map: 0, start: 1, route: 1, corridor: 2, optimize: 3, validate: 4, clearance: 5, done: 6 };
+let pollBusy = false;
+async function pollProgress(final = false, ok = false) {
+  if (pollBusy && !final) return; pollBusy = true;
+  try { renderProgress(await (await api("/api/progress")).json(), final, ok); } catch {} finally { pollBusy = false; }
+}
+function hideProgress() { $("progress").style.display = "none"; $("runBadge").style.display = "none"; }
+function renderProgress(p, final, ok) {
+  if (!p || p.stage === undefined) return;
+  if (p.routes) drawRoutes(p.routes, p.attempt);
+  const cur = final ? (ok ? 6 : ORDER[p.stage] ?? 0) : ORDER[p.stage] ?? 0;
+  const failedHere = final && !ok;
+  const items = STAGES.map(([key, title, sub], i) => {
+    let cls = i < cur ? "done" : i === cur ? (failedHere ? "failed" : "active") : "";
+    let extra = `<span class="sub">${sub}</span>`;
+    if (key === "route" && p.legs) {
+      const n = i < cur ? p.legs : Math.max(0, p.leg - 1);
+      extra = `<span class="sub">leg ${Math.min(p.leg || 0, p.legs)}/${p.legs}` +
+        (i === cur && p.detail ? ` · ${escapeHtml(p.detail)}` : "") +
+        `</span><div class="bar"><i style="width:${(i < cur ? 100 : 100 * n / p.legs).toFixed(0)}%"></i></div>`;
+    } else if (i === cur && p.detail) extra = `<span class="sub">${escapeHtml(p.detail)}</span>`;
+    return `<li class="${cls}">${title}${extra}</li>`;
+  }).join("");
+  const chips = (p.attempts || []).map(a => `<span class="chip ${a.ok ? "ok" : "bad"}" title="${escapeHtml(a.error || "")}">`
+      + `#${a.n} ${a.ok ? "✓" : "✕"} ${a.s.toFixed(1)} s</span>`).join("")
+    + (!final && p.attempt && !(p.attempts || []).some(a => a.n === p.attempt) ? `<span class="chip run">#${p.attempt} running</span>` : "");
+  const head = final ? (ok ? "✓ Plan finished" : "✕ No valid path") : `Planning · attempt ${p.attempt || 1}/${p.tries || "?"}`;
+  $("progress").innerHTML = `<div class="top">${final ? "" : '<span class="spin"></span>'}<b>${head}</b>`
+    + `<span class="clock">${(p.elapsed || 0).toFixed(1)} s</span></div>`
+    + (chips ? `<div class="chips">${chips}</div>` : "")
+    + `<ul class="steps">${items}</ul>`
+    + (p.lines && p.lines.length && !final ? `<pre>${escapeHtml(p.lines.join("\n"))}</pre>` : "");
+  $("progress").style.display = "block";
+  const st = STAGES[Math.min(cur, 5)];
+  $("runText").textContent = `${st[1]}${p.stage === "route" && p.legs ? ` · leg ${p.leg}/${p.legs}` : ""} · ${(p.elapsed || 0).toFixed(1)} s`;
+  $("runBadge").style.display = final ? "none" : "flex";
+}
 
 function showResult(res) {
   const r = $("result");

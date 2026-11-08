@@ -369,6 +369,9 @@ int main(int argc, char **argv)
     std::vector<Vector3d> route; // all legs, joint points not repeated
     for (size_t i = 0; i + 1 < wps.size(); i++)
     {
+        // Progress for the web UI (stderr, so stdout stays byte-identical for the parity test)
+        std::fprintf(stderr, "STAGE route %zu/%zu %s -> %s\n", i + 1, wps.size() - 1,
+                     names[i].c_str(), names[i + 1].c_str());
         std::vector<Vector3d> leg;
         const double cost = sfc_gen::planPath<voxel_map::VoxelMap>(wps[i],
                                                                     wps[i + 1],
@@ -382,6 +385,11 @@ int main(int argc, char **argv)
                  " within TimeoutRRT");
         route.insert(route.end(), leg.begin() + (route.empty() ? 0 : 1), leg.end());
         legs.push_back(leg);
+        // The leg's RRT route for the web UI's live view (stderr; map frame, "x y z;x y z;...")
+        std::fprintf(stderr, "LEG %zu", i + 1);
+        for (const Vector3d &q : leg)
+            std::fprintf(stderr, " %.4f %.4f %.4f;", q(0), q(1), q(2));
+        std::fprintf(stderr, "\n");
     }
     const double frontMs = msSince(tFront);
     {
@@ -403,6 +411,7 @@ int main(int argc, char **argv)
     // shortCut keeps each leg's first and last polytope, which contain the leg's
     // endpoints, so box k normally overlaps the end of leg k and the start of leg k+1:
     //   [leg 1 polytopes] box 1 [leg 2 polytopes] box 2 ... [last leg polytopes]
+    std::fprintf(stderr, "STAGE corridor %zu legs\n", legs.size());
     const auto tCorr = std::chrono::steady_clock::now();
     std::vector<Eigen::MatrixX4d> hPolys;
     std::vector<Vector3d> pc;
@@ -432,6 +441,7 @@ int main(int argc, char **argv)
     const double corrMs = msSince(tCorr);
 
     // --- Optimization: upstream:167-221 ---
+    std::fprintf(stderr, "STAGE optimize %zu polytopes\n", hPolys.size());
     const auto tOpt = std::chrono::steady_clock::now();
     if (route.size() <= 1)
         fail("route has fewer than two points");
@@ -475,6 +485,7 @@ int main(int argc, char **argv)
                 traj.getTotalDuration(), frontMs, corrMs, optMs);
     std::fflush(stdout);
 
+    std::fprintf(stderr, "STAGE validate %.2f s trajectory\n", traj.getTotalDuration());
     // --- Validation: corridor and limits are only soft penalties, so check the result ---
     // Dense 1 ms samples: never in an occupied (undilated) voxel or outside
     // MapBound, inside every checkpoint box in order, and within the

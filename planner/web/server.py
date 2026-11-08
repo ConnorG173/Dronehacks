@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -335,7 +336,71 @@ def ned_to_map(rows, start, heading_deg):
     return np.stack([c * x + s * y + start[0], s * x - c * y + start[1], -z + start[2]], axis=1)
 
 
+# Live progress of the running plan, polled by the page (GET /api/progress). One plan at a time (plan_lock).
+progress = {"active": False}
+progress_lock = threading.Lock()
+
+
+def set_progress(**kw):
+    with progress_lock:
+        if kw.pop("reset", False):
+            progress.clear()
+            progress.update(active=True, t0=time.time(), stage="map", detail="", attempt=0, tries=0,
+                            leg=0, legs=0, lines=[], attempts=[])
+        progress.update(kw)
+        progress["elapsed"] = round(time.time() - progress.get("t0", time.time()), 2)
+
+
+def get_progress():
+    with progress_lock:
+        p = json.loads(json.dumps(progress))
+    if p.get("active"):
+        p["elapsed"] = round(time.time() - p["t0"], 2)
+    return p
+
+
+def run_planner(rd, env, attempt):
+    """One gcopter_planner run, streaming its STAGE lines into progress. Returns (exit code, output)."""
+    proc = subprocess.Popen([planner_exe, "config.yaml", "--out", "."], cwd=rd, env=env, text=True,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=1)
+    killer = threading.Timer(300, proc.kill)      # same 300 s limit as before
+    killer.start()
+    out = []
+    try:
+        for line in proc.stdout:
+            lg = re.match(r"LEG (\d+) (.*)", line)
+            if lg:                                    # one leg's RRT route: [[x, y, z], ...]
+                pts = [[float(v) for v in q.split()] for q in lg.group(2).split(";") if q.strip()]
+                with progress_lock:
+                    progress["routes"] = progress.get("routes", []) + [pts]
+                continue                              # long line: kept out of the log
+            out.append(line)
+            m = re.match(r"STAGE (\w+) ?(.*)", line)
+            with progress_lock:
+                progress["lines"] = (progress.get("lines", []) + [line.rstrip()])[-14:]
+                if m:
+                    stage, rest = m.group(1), m.group(2)
+                    progress["stage"], progress["detail"] = stage, rest
+                    lm = re.match(r"(\d+)/(\d+) (.*)", rest) if stage == "route" else None
+                    if lm:
+                        progress["leg"], progress["legs"], progress["detail"] = int(lm.group(1)), int(lm.group(2)), lm.group(3)
+                elif line.startswith("ERROR:"):
+                    progress["detail"] = line[6:].strip()
+        proc.wait()
+    finally:
+        killer.cancel()
+    return proc.returncode, "".join(out)
+
+
 def plan(req):
+    set_progress(reset=True, stage="map", detail="sampling the course surfaces into map points")
+    try:
+        return _plan(req)
+    finally:
+        set_progress(active=False, finished=time.time())
+
+
+def _plan(req):
     d = course_dir(req["id"])
     t, mp, pl = req["transform"], req["map"], req["planner"]
     runs = [n for n in os.listdir(d) if n.startswith("plan-")]
@@ -346,6 +411,7 @@ def plan(req):
     v, f = map_vertices(req["id"], t)
     pts = cad_to_map.map_points(v[f], float(mp["spacing"]), bool(mp["addFloor"]))
     cad_to_map.write_map(os.path.join(rd, "map.bin"), pts)
+    set_progress(detail="%d map points" % len(pts))
 
     settings = {
         "MapFile": "map.bin", "MapBound": [float(x) for x in mp["bound"]],
@@ -364,18 +430,24 @@ def plan(req):
     log, ok = [], False
     tries = max(1, min(20, int(pl["tries"])))
     for i in range(tries):  # the RRT is random: a failed run can pass on retry
-        r = subprocess.run([planner_exe, "config.yaml", "--out", "."], cwd=rd, env=env,
-                           capture_output=True, text=True, timeout=300)
-        log.append("== attempt %d/%d, exit %d\n%s%s" % (i + 1, tries, r.returncode, r.stdout, r.stderr))
-        if r.returncode == 0:
+        set_progress(attempt=i + 1, tries=tries, stage="start", detail="starting gcopter_planner", leg=0, lines=[], routes=[])
+        t_a = time.time()
+        code, out = run_planner(rd, env, i + 1)
+        log.append("== attempt %d/%d, exit %d\n%s" % (i + 1, tries, code, out))
+        err = re.findall(r"ERROR: (.*)", out)
+        with progress_lock:
+            progress["attempts"] = progress.get("attempts", []) + [
+                {"n": i + 1, "ok": code == 0, "s": round(time.time() - t_a, 2), "error": err[-1] if err else ""}]
+        if code == 0:
             ok = True
             break
     log = "\n".join(log)
     with open(os.path.join(rd, "planner.log"), "w", encoding="utf-8") as fh:
         fh.write(log)
 
-    res = {"ok": ok, "run": run, "log": log, "mapPoints": int(len(pts))}
+    res = {"ok": ok, "run": run, "log": log, "mapPoints": int(len(pts)), "routes": get_progress().get("routes", [])}
     if ok:
+        set_progress(stage="clearance", detail="measuring distance to the course along the path")
         raw = open(os.path.join(rd, "path.bin"), "rb").read()
         rows = np.frombuffer(raw, "<f8", offset=32).reshape(-1, 12)
         p = ned_to_map(rows, settings["StartPos"], settings["StartHeadingDeg"])
@@ -417,6 +489,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if u.path in ("/", "/index.html"):
                 return self.send(200, open(os.path.join(HERE, "index.html"), "rb").read(), "text/html; charset=utf-8")
+            if u.path == "/api/progress":
+                return self.send(200, get_progress())
             if u.path == "/api/example":
                 info = import_course(EXAMPLE_STEP, os.path.basename(EXAMPLE_STEP))
                 info["mission"] = example_mission()
@@ -458,7 +532,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send(500, {"error": "%s: %s" % (type(e).__name__, e)})
 
     def log_message(self, fmt_, *args):
-        sys.stderr.write("%s\n" % (fmt_ % args))
+        if "/api/progress" not in self.path:      # the page polls it twice a second while planning
+            sys.stderr.write("%s\n" % (fmt_ % args))
 
 
 def main():
