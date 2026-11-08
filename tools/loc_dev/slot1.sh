@@ -94,8 +94,8 @@ reset)
   bash "$REPO/sim/run_sim.sh" 1 stop || true
   sleep 3
   bash "$REPO/sim/run_sim.sh" 1
-  echo "settling 90 s..."
-  sleep 90
+  echo "settling 150 s (Gazebo loads the textured course in ~2 min, EKF2 restarts after PX4)..."
+  sleep 150
   bash "$REPO/sim/tools/check_sim.sh" 2>&1 | grep -iE "rate|xy_valid|armed|blank|image" | head -10
   ;;
 stop)
