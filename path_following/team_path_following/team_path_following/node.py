@@ -94,6 +94,9 @@ class MissionTracker(Node):
         d('hover_hold_s', 10.0)            # hover preset: hold time at HoverHeight over the pad
         d('first_leg_speed_mps', 0.4)      # first_leg preset: planner MaxVelMag
         d('first_leg_hold_s', 5.0)         # first_leg preset: hold at the checkpoint before landing
+        d('retime_slow_below_m', 0.0)      # slow the plan where its clearance is below this (0 = off)
+        d('retime_full_slow_m', 0.35)      # ... reaching retime_k_max at this clearance
+        d('retime_k_max', 1.0)             # max local time stretch (2 = half speed)
         d('return_config', '')             # '' off | 'reverse' (course goal -> start) | a config path
         d('return_path_file', '')          # fly this DHPATH file as the return instead of planning
         d('return_z_ceiling_m', 1.6)       # map z ceiling on the return leg (rule 7.7 exception)
@@ -229,6 +232,12 @@ class MissionTracker(Node):
                 traj = Trajectory.load(path_file, self.course)
                 if preset == 'first_leg':
                     traj = traj.with_hold(float(self.gp('first_leg_hold_s')))
+            if self.gp('retime_slow_below_m') > 0.0 and self.gp('retime_k_max') > 1.0:
+                cm = ClearanceMap(read_dhmap(self.course.map_file), self.course.map_bound)
+                d0 = traj.duration
+                traj = traj.clearance_retimed(cm.distance, float(self.gp('retime_slow_below_m')),
+                                              float(self.gp('retime_full_slow_m')), float(self.gp('retime_k_max')))
+                self.get_logger().info(f'clearance re-timing: {d0:.2f} s -> {traj.duration:.2f} s')
             if self.gp('time_scale') != 1.0:
                 traj = traj.time_scaled(float(self.gp('time_scale')))
             self.get_logger().info(f'mission preset: {preset}')

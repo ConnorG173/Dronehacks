@@ -346,10 +346,15 @@ def main():
     ap.add_argument('--return-course', help='return-leg config (enables the touch-and-go return)')
     ap.add_argument('--return-path', help='return-leg DHPATH file')
     ap.add_argument('--json', action='store_true')
+    ap.add_argument('--retime', type=float, nargs=3, metavar=('SLOW_BELOW', 'FULL_SLOW', 'K_MAX'),
+                    help="node's clearance re-timing (retime_slow_below_m, retime_full_slow_m, retime_k_max)")
     ap.add_argument('--npz', help='save t, u (commanded), v (true), state for fit_lag.py')
     a = ap.parse_args()
     course = load_course(a.course)
     traj = Trajectory.load(a.path, course)
+    if a.retime:
+        cm = ClearanceMap(read_dhmap(course.map_file), course.map_bound)
+        traj = traj.clearance_retimed(cm.distance, *a.retime)
     if a.speed_scale != 1.0:
         traj = traj.time_scaled(a.speed_scale)
     sim = SimParams()

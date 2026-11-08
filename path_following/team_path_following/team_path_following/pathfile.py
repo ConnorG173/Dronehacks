@@ -134,6 +134,25 @@ class Trajectory:
         return Trajectory(cat(self.t, h.t + self.t[-1]), cat(self.p, h.p), cat(self.v, h.v), cat(self.a, h.a),
                           cat(self.yaw, h.yaw), cat(self.yaw_rate, h.yaw_rate))
 
+    def clearance_retimed(self, clearance, slow_below, full_slow_at, k_max, smooth_s=1.0):
+        """Copy slowed where the plan runs close to obstacles: the local time stretch k goes from 1 at
+        clearance >= slow_below to k_max at clearance <= full_slow_at, smoothed over smooth_s (centred
+        moving average) so the re-timed velocity and acceleration stay continuous. Corner cutting grows
+        with speed, so this buys clearance exactly in the narrow parts (e.g. a chicane channel).
+        clearance: callable (N, 3) -> (N,) distance to the nearest obstacle (m)."""
+        if k_max <= 1.0 or slow_below <= full_slow_at:
+            return self
+        c = np.asarray(clearance(self.p), float)
+        k = 1.0 + (k_max - 1.0) * np.clip((slow_below - c) / (slow_below - full_slow_at), 0.0, 1.0)
+        dt = np.diff(self.t)
+        n = max(1, int(round(smooth_s / max(float(np.median(dt)), 1e-6))))
+        if n > 1:
+            pad = np.pad(k, (n // 2, n - 1 - n // 2), mode='edge')
+            k = np.convolve(pad, np.ones(n) / n, mode='valid')
+        km = 0.5 * (k[1:] + k[:-1])
+        t = np.concatenate([[0.0], np.cumsum(dt * km)])
+        return Trajectory(t, self.p, self.v / k[:, None], self.a / (k * k)[:, None], self.yaw, self.yaw_rate / k)
+
     def time_scaled(self, k):
         """Uniformly slowed (k > 1) or sped up (k < 1) copy: exact for any path."""
         return Trajectory(self.t * k, self.p, self.v / k, self.a / (k * k), self.yaw, self.yaw_rate / k)
