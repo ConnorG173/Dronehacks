@@ -21,6 +21,10 @@ IN_C="source /opt/ros/humble/setup.bash && source /root/skybeta_ws/install/setup
 RUNS=runs_loc
 COURSE=planner/config/course_v3.yaml
 
+rtf() {  # Gazebo real-time factor now (runs below ~0.9 are invalid for timing/dynamics)
+  GZ_PARTITION=sim1 timeout 10 gz topic -e -t /world/dronehacks_course/stats -n 1 2>/dev/null | grep -m1 real_time_factor | awk '{print $2}'
+}
+
 dexec() { docker exec -e ROS_DOMAIN_ID="$ROS_DOMAIN_ID" -e FASTRTPS_DEFAULT_PROFILES_FILE="$DDS" "$@"; }
 
 start_loc() {
@@ -79,8 +83,11 @@ fly)
   sleep 2
   echo "--- pilot go"
   timeout 150 python3 "$REPO/sim/pilot.py" --sim 1 go || echo "pilot go failed"
+  ( sleep 10; echo "rtf_in_flight $(rtf)" >> "$REPO/$out/rtf.txt" ) &
   ok=0
   python3 "$REPO/path_following/sim/wait_mission.py" 180 && ok=1
+  echo "rtf_end $(rtf)" >> "$REPO/$out/rtf.txt"
+  echo "--- RTF:"; cat "$REPO/$out/rtf.txt"
   if [ "$ok" != 1 ]; then timeout 30 python3 "$REPO/sim/pilot.py" --sim 1 land || true; fi
   dexec "$CONTAINER" pkill -INT -f "ros2 bag record" || true
   sleep 3
