@@ -43,5 +43,6 @@ tmux new-window -t "$TMUX_SESSION" -n ekfreset "until $E bash $REPO/sim/tools/px
 tmux new-window -t "$TMUX_SESSION" -n rc "python3 $REPO/sim/rc.py --sim $SIM_ID; bash"
 tmux new-window -t "$TMUX_SESSION" -n bridge "$E bash $S/bridge.sh; bash"
 tmux new-window -t "$TMUX_SESSION" -n stack "$E bash $S/stack.sh; bash"
+tmux new-window -t "$TMUX_SESSION" -n viz "$E COURSE=${COURSE:-planner/config/course_v3_gateb.yaml} bash $S/viz.sh; bash"
 tmux new-window -t "$TMUX_SESSION" -n foxglove "source /opt/ros/humble/setup.bash && ROS_DOMAIN_ID=$ROS_DOMAIN_ID FASTRTPS_DEFAULT_PROFILES_FILE=$FASTRTPS_DEFAULT_PROFILES_FILE ros2 launch foxglove_bridge foxglove_bridge_launch.xml port:=$FOXGLOVE_PORT; bash"
 echo "sim $SIM_ID starting: tmux attach -t $TMUX_SESSION   (ROS_DOMAIN_ID=$ROS_DOMAIN_ID, foxglove :$FOXGLOVE_PORT, MAVLink :$MAV_PORT)"
