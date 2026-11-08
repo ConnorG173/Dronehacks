@@ -48,6 +48,25 @@ Reading it:
   re-acquired from 3 fixes, and ERROR clears after about 6 s. The max error (0.67 m) falls inside the
   ERROR period.
 
+## Gazebo slot 1 (real stack: cuVSLAM on rendered stereo, PX4 SITL, path following's tracker)
+
+`tools/loc_dev/slot1.sh fly gt <name>`: the tracker flies the course on **ground truth**, and
+localization runs with correction plus wall matcher, so its errors cannot affect the flight.
+Errors are /team/odom_map vs `/sim/ground_truth/odom` (`tools/loc_eval.py`, `tools/loc_dev/bag_loc_debug.py`).
+
+| run | course textures | outcome | odom_map ATE h RMS / max | checkpoint errors (m) | status | notes |
+|---|---|---|---|---|---|---|
+| gt01 | 6 tiled | no takeoff | – | – | ERROR on the pad | anchor froze on the pad: PX4 says not-landed after arming with throttle centred; bit-identical sim VIO then read as "frozen". **Fixed:** freeze needs real motion; static pose alone is WARN |
+| gt03 | 6 tiled | tracker held mid-course | 0.30 / 0.36 | 0.02, 0.02, 0.07, 0.19, 0.33 | ERROR 72 % | real cuVSLAM jump of 0.31 m in one frame latched ERROR, so the tracker held. **Fixed:** jumps are absorbed into the anchor (pose continuous, WARN 3 s) |
+| gt04 | 6 tiled | **mission done** (64.5 s) | 0.22 / 0.49 | 0.02, 0.04, 0.07, 0.06, 0.32 | OK 59 % / WARN 41 % / ERROR 0 | a cuVSLAM burst of 10 frames jumping up to 2.8 m and 141°, absorbed. 8 % of samples had error > 0.3 m while status OK, so the correction is **not** trustworthy on this course |
+
+The matcher diagnostic on gt04 (416 attempts with ground truth):
+- When the prior was within 5 cm of truth, the scan scored **0.956 at the prior**, which means stereo
+  depth, camera extrinsics and map alignment are right.
+- Low scores come from wrong priors, after cuVSLAM jumped on the repetitive textures. In that
+  situation the matcher can lock onto the wrong structure (match error p50 0.29 m). The coordinator
+  re-textured the course (sim-and-plans 3dedfc0) because the tiles caused those cuVSLAM jumps.
+
 ## Matcher property tests (synthetic scans on the course grid, `src/team_loc_matcher/test`)
 
 | test | result |
