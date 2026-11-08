@@ -60,6 +60,21 @@ Errors are /team/odom_map vs `/sim/ground_truth/odom` (`tools/loc_eval.py`, `too
 | gt03 | 6 tiled | tracker held mid-course | 0.30 / 0.36 | 0.02, 0.02, 0.07, 0.19, 0.33 | ERROR 72 % | real cuVSLAM jump of 0.31 m in one frame latched ERROR, so the tracker held. **Fixed:** jumps are absorbed into the anchor (pose continuous, WARN 3 s) |
 | gt04 | 6 tiled | **mission done** (64.5 s) | 0.22 / 0.49 | 0.02, 0.04, 0.07, 0.06, 0.32 | OK 59 % / WARN 41 % / ERROR 0 | a cuVSLAM burst of 10 frames jumping up to 2.8 m and 141°, absorbed. 8 % of samples had error > 0.3 m while status OK, so the correction is **not** trustworthy on this course |
 
+| gt05 | per-part (3dedfc0) | mission done | 0.126 / 0.23 (**raw VIO 0.090**) | corr 0.05, 0.11, 0.07, 0.20, 0.15 / raw 0.03, 0.02, 0.04, 0.06, 0.19 | WARN 99.9 % | cuVSLAM clean (1 step of 0.13 m). **The correction was worse than raw VIO**: the matcher landed 12–24 cm off even with the prior on truth. Cause: the nets were modelled as invisible, but the cameras see them, so the matcher slid scans onto interior walls |
+| gt08 | per-part | mission done (47 s; RTF ≈ 0.3, invalid for dynamics) | **0.058 / 0.12** (raw VIO 0.084) | corr 0.04, 0.04, 0.03, 0.11, 0.10 / raw 0.05, 0.05, 0.06, 0.13, 0.10 | OK 93 % / WARN 7 % / ERROR 0; never error > 0.3 m while OK | after the net fix (half-strength net surfaces): 219 of 443 matcher attempts accepted, match error p50 7.9 cm. **The correction beats raw VIO** (RMS −31 %), but the window error (≈ 0.10 m) is not below raw yet. One run, at low RTF |
+
+The matcher on the gt05 scans (37 dumped scans, prior on truth):
+
+| net model | accepted | match error p50 |
+|---|---|---|
+| invisible (old) | 4/37 | 24 cm |
+| weak (default now) | 25/37 | 4 cm |
+| surface | 33/37 | 5 cm |
+
+`surface` is unsafe if the real nets are see-through: 8 of 160 synthetic fixes were overconfident with
+invisible nets and room returns. `weak` gave 1 of 320 (d² 13). Only `invisible` and `neutral`
+gave none, and both are bad on the sim scans. Parameter: `wallgrid.build_wallgrid(net_mode=...)`.
+
 The matcher diagnostic on gt04 (416 attempts with ground truth):
 - When the prior was within 5 cm of truth, the scan scored **0.956 at the prior**, which means stereo
   depth, camera extrinsics and map alignment are right.
