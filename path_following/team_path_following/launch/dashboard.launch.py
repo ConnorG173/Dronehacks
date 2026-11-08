@@ -55,7 +55,22 @@ PASS = [
     ('planner_binary', '', 'default <repo_root>/planner/build/gcopter_planner'),
     ('out_dir', '/tmp/team_path_following', 'planner output directory'),
     ('px4_local_position_topic', '/fmu/out/vehicle_local_position', 'PX4 local position (UART DDS return telemetry)'),
+    ('path_file', '', "fly this DHPATH route (launch-relative NED) instead of planning Gate B; '' = plan"),
+    ('peak_speed_mps', '0.86', 'with path_file: slow the route uniformly to this peak (never faster than the file)'),
 ]
+
+
+def _route_time_scale(path_file, peak):
+    """Uniform slow-down so the file's peak horizontal+vertical speed becomes `peak` (>= 1.0)."""
+    import struct
+    import numpy as np
+    raw = open(path_file, 'rb').read()
+    if raw[:6] != b'DHPATH':
+        raise ValueError(f'{path_file} is not a DHPATH file')
+    rows = struct.unpack_from('<Q', raw, 16)[0]
+    a = np.frombuffer(raw, '<f8', rows * 12, 32).reshape(rows, 12)
+    vmax = float(np.max(np.linalg.norm(a[:, 4:7], axis=1)))
+    return max(1.0, vmax / float(peak)), vmax
 
 
 def _include(context):
@@ -67,6 +82,14 @@ def _include(context):
         params = os.path.join(HERE, '..', 'config', 'tracker_conservative.yaml')
     args = dict(FIXED)
     args.update({n: lc(n) for n, _, _ in PASS})
+    path_file, peak = args.pop('path_file'), args.pop('peak_speed_mps')
+    if path_file:
+        if args['mission_preset'] == 'first_leg':
+            raise RuntimeError('first_leg re-plans on the CAD map; with path_file fly hover, then course')
+        k, vmax = _route_time_scale(path_file, peak)
+        args['path_file'] = path_file
+        args['time_scale'] = f'{k:.3f}'
+        print(f'[dashboard.launch] route {path_file}: file peak {vmax:.2f} m/s, time_scale {k:.2f} -> peak {vmax / k:.2f} m/s')
     args['vio_topic'] = args['pose_topic']      # no fallback to raw (unleveled) VIO
     args['course_config'] = os.path.join(root, 'planner', 'config', 'course_v3_gateb.yaml')
     args['planner_binary'] = args['planner_binary'] or os.path.join(root, 'planner', 'build', 'gcopter_planner')

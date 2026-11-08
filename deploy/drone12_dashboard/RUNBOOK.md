@@ -1,5 +1,14 @@
 # drone-conservative-v1 on drone 12's dashboard stack
 
+> **Route (2026-11-07 22:30):** the course changed. By default `run.sh` flies the team's new route,
+> `repo/path_following/routes/course_20261107_2212.bin`, the same file the dashboard loaded at 22:14.
+> It's slowed uniformly to the conservative 0.86 m/s peak: 9.0 s becomes about 25.5 s. It ends 0.4 m above the pad,
+> then lands. It's flown relative to the drone's heading at arming, so **place the drone on the mark facing
+> the same way as for the dashboard's copy of this route.**
+> - Offline check: done, cross-track 2.6 cm RMS (max 14 cm), landed 2 cm from the route end.
+> - No sim check: Gazebo only has the old walls.
+> - `first_leg` only exists for the old Gate B route (`bash run.sh first_leg <bh> gateb`).
+
 The same flight as `drone-conservative-v1`, adapted to the stack now running on drone 12. That flight is:
 - Gate B route;
 - plan MaxVelMag 1.2, slowed 1.4x (peak about 0.86 m/s, course about 27 s);
@@ -37,7 +46,7 @@ bash build.sh        # package + planner into the kit's own build/install (about
    - VIO at about 30 Hz;
    - no `/skybeta/setpoint/pose`;
    - PX4 local position flowing.
-5. **Start:** `bash run.sh hover <base_height>`. Then `tail -f ~/team_ws/bags/cv1_hover_*.log` until you see `plan ready`. Nothing moves yet.
+5. **Start:** `bash run.sh hover <base_height>`, later `bash run.sh course <base_height>`. Then `tail -f ~/team_ws/bags/cv1_hover_*.log` until you see `plan ready`. Nothing moves yet.
 6. **Offboard:** `/skybeta/state` must show `nav_state_name: OFFBOARD`. The dashboard's grounded selector does this at startup. If PX4 is in another mode (for example AUTO_LOITER after a landing), the pilot or operator puts it in Offboard while disarmed. **Our code never changes modes or arms.**
 7. **Pilot arms.** Our node takes off at once: 1 m/s climb to 1.0 m. Then:
    - `hover`: holds 10 s and lands on the mark.
@@ -54,7 +63,7 @@ bash build.sh        # package + planner into the kit's own build/install (about
    After a takeover our node never re-engages in that run.
 9. **Stop:** `bash stop.sh`. It closes our node and the recorder; the dashboard is untouched. Bags go to `~/team_ws/bags/cv1_<preset>_<time>/`.
 
-Fly in order: hover, then first_leg, then course. Move on only after a clean flight. After the first flights, fit the real airframe lag before going faster:
+Fly in order: hover, then course. With the old route: hover, then first_leg, then course. Move on only after a clean flight. After the first flights, fit the real airframe lag before going faster:
 `python3 repo/path_following/tools/fit_lag.py <bag> --states course`
 
 ## What our node will do on its own
