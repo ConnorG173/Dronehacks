@@ -21,7 +21,7 @@ Candidate 3 (path-following 5d62099) targets that one spot.
 - 28.0 s by the same course measure as candidate 2's 25.2 s (22.7 s on the node's own clock);
 - 0 touches at 0.29 m, min clearance 0.30 m, 5/5 openings, landed in the pad.
 
-le1 and le3 were void: the sim's `pilot.py go` never armed. That arming flake hit 2 of 3 resets and needs fixing before the next sim session.
+le1 and le3 were void: the sim's `pilot.py go` never armed. Cause found 06:00 UTC: the coordinator's generated `slot2.sh` reset slot 0's sim (`run_sim.sh 0`), so slot-2 resets restarted path following's simulator mid-run. Fixed in `sim/coordinator/slot2.sh`; generate slot scripts with all three `0` substitutions (SIM_ID, `--sim`, `run_sim.sh`).
 
 ## What to fly on the drone (ready)
 Justin accepted 0.25 m clearance as the bar (the strict 0.29 m was over-conservative), so the fast profile is frozen.

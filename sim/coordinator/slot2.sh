@@ -109,9 +109,9 @@ reset)
   # fresh world + PX4. Gazebo loads the course textures (~2 min), EKF2 restarts itself at PX4 up + 30 s:
   # wait 150 s, then until check_sim reports image contrast OK and xy_valid (at most 3 more minutes)
   tmux kill-window -t "$TMUX_SESSION:team" 2>/dev/null || true
-  bash "$REPO/sim/run_sim.sh" 0 stop || true
+  bash "$REPO/sim/run_sim.sh" 2 stop || true
   sleep 3
-  bash "$REPO/sim/run_sim.sh" 0
+  bash "$REPO/sim/run_sim.sh" 2
   echo "settling 150 s..."
   sleep 150
   for _ in $(seq 1 9); do
@@ -123,7 +123,7 @@ reset)
   # ground truth is what every run is scored against: once, a restart came up without it (cons01/02)
   if ! dexec "$CONTAINER" bash -lc "source /opt/ros/humble/setup.bash && timeout 10 ros2 topic echo --once /sim/ground_truth/odom >/dev/null 2>&1"; then
     echo "no /sim/ground_truth/odom: restarting the sim once more"
-    bash "$REPO/sim/run_sim.sh" 0 stop || true; sleep 3; bash "$REPO/sim/run_sim.sh" 0; sleep 180
+    bash "$REPO/sim/run_sim.sh" 2 stop || true; sleep 3; bash "$REPO/sim/run_sim.sh" 2; sleep 180
     dexec "$CONTAINER" bash -lc "source /opt/ros/humble/setup.bash && timeout 10 ros2 topic echo --once /sim/ground_truth/odom >/dev/null 2>&1" \
       && echo "ground truth OK" || echo "WARNING: still no ground truth (runs cannot be scored)"
   else
