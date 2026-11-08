@@ -71,7 +71,17 @@ dxd "exec python3 -u $KIT/team_imu_prep.py $SRC --calib $KIT/calib.json > $KIT/$
 dxd "exec /opt/ros/humble/lib/tf2_ros/static_transform_publisher --x $TX --y $TY --z $TZ --qx $QX --qy $QY --qz $QZ --qw $QW \
   --frame-id base_link --child-frame-id team_imu_frame --ros-args -r __node:=team_imu_tf > $KIT/$LOG/tf.log 2>&1"
 sleep 2
-dxd "export LD_LIBRARY_PATH=$VSLAM_LIB:/opt/ros/humble/share/isaac_ros_gxf/gxf/lib/serialization:\$LD_LIBRARY_PATH; \
+# Our build has no RUNPATH (the stock binary carries the GXF/NITROS library dirs in its own): take the stock
+# library's RUNPATH, with the patched lib dir in front so OUR libvisual_slam_node.so wins.
+RP=$(docker exec "$C" bash -c "readelf -d /opt/ros/humble/lib/libvisual_slam_node.so | sed -n 's/.*runpath: \\[\\(.*\\)\\]/\\1/p'")
+[[ -n "$RP" ]] || { echo "could not read the stock RUNPATH"; stop_all; exit 1; }
+LDP="$VSLAM_LIB:$RP"
+if ! docker exec "$C" bash -c "LD_LIBRARY_PATH=$LDP:\$LD_LIBRARY_PATH ldd $VSLAM_BIN" > "$HOSTKIT/$LOG/ldd.txt" 2>&1 \
+   || grep -q "not found" "$HOSTKIT/$LOG/ldd.txt"; then
+  echo "patched cuVSLAM has unresolved libraries:"; grep "not found" "$HOSTKIT/$LOG/ldd.txt"; stop_all; exit 1
+fi
+grep "libvisual_slam_node" "$HOSTKIT/$LOG/ldd.txt" | tee -a "$HOSTKIT/$LOG/config.txt"
+dxd "export LD_LIBRARY_PATH=$LDP:\$LD_LIBRARY_PATH; \
  exec nice -n 10 $VSLAM_BIN --ros-args \
   -r __node:=team_imu_vio -r __ns:=/team_imu \
   -r visual_slam/image_0:=/oak/left/image_mono -r visual_slam/camera_info_0:=/oak/left/camera_info \
