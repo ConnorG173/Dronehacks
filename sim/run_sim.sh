@@ -39,7 +39,7 @@ sleep 8
 # initialises on them, diverges (tilt off by tens of degrees for ~30 s), and keeps a corrupted accel bias
 # that never re-converges at rest -> "High Accelerometer Bias" blocks arming. Restart EKF2 once the
 # sensors are clean; afterwards attitude and bias match ground truth.
-tmux new-window -t "$TMUX_SESSION" -n ekfreset "sleep 30; $E bash $REPO/sim/tools/px4_cmd.sh ekf2 stop; sleep 1; $E bash $REPO/sim/tools/px4_cmd.sh ekf2 start; echo 'EKF2 restarted after sensor settle'; bash"
+tmux new-window -t "$TMUX_SESSION" -n ekfreset "until $E bash $REPO/sim/tools/px4_cmd.sh ekf2 status >/dev/null 2>&1; do sleep 2; done; sleep 30; $E bash $REPO/sim/tools/px4_cmd.sh ekf2 stop; sleep 1; $E bash $REPO/sim/tools/px4_cmd.sh ekf2 start; echo 'EKF2 restarted after sensor settle'; bash"
 tmux new-window -t "$TMUX_SESSION" -n rc "python3 $REPO/sim/rc.py --sim $SIM_ID; bash"
 tmux new-window -t "$TMUX_SESSION" -n bridge "$E bash $S/bridge.sh; bash"
 tmux new-window -t "$TMUX_SESSION" -n stack "$E bash $S/stack.sh; bash"
