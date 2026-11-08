@@ -32,6 +32,21 @@ PALETTE = [(0.92, 0.55, 0.35), (0.40, 0.65, 0.90), (0.55, 0.80, 0.45), (0.85, 0.
            (0.70, 0.55, 0.85), (0.45, 0.80, 0.80), (0.90, 0.60, 0.70), (0.65, 0.65, 0.65)]
 
 
+def shell_kind(mn, mx):
+    """The cage around the course: 'roof' (flat at the top) or 'wall' (a 6 m outer side), else None. The solid cage
+    hides the whole course in Foxglove, so the roof is skipped and the walls are drawn nearly transparent."""
+    span = mx - mn
+    if span[2] < 0.05 and mn[2] > 2.5 and span[0] > 5 and span[1] > 5:
+        return "roof"
+    for a, b in ((0, 1), (1, 0)):
+        if span[a] < 0.05 and abs(mn[a]) > 2.9 and span[b] > 5:
+            return "wall"
+    return None
+
+
+SHELL_ALPHA = 0.12
+
+
 def col(r, g, b, a=1.0):
     c = Color(); c.r, c.g, c.b, c.a = float(r), float(g), float(b), float(a); return c
 
@@ -119,6 +134,10 @@ class Viz(Node):
         up = SceneUpdate()
         light = np.array([0.35, 0.25, 0.9]); light /= np.linalg.norm(light)
         for i, (name, tris) in enumerate(sorted(load_obj_groups(OBJ).items())):
+            v = tris.reshape(-1, 3); kind = shell_kind(v.min(0), v.max(0))
+            if kind == "roof":
+                continue
+            alpha = SHELL_ALPHA if kind == "wall" else 1.0
             base = np.array((0.30, 0.30, 0.34) if name == "floor" else PALETTE[i % len(PALETTE)])
             n = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
             n /= np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-9)
@@ -126,7 +145,7 @@ class Viz(Node):
             e = SceneEntity(); e.frame_id = "course"; e.id = f"course_{name}"; e.frame_locked = True
             t = TriangleListPrimitive(); t.pose = pose()
             t.points = [Point(x=float(v[0]), y=float(v[1]), z=float(v[2])) for tri in tris for v in tri]
-            t.colors = [col(*(base * k)) for k in shade for _ in range(3)]
+            t.colors = [col(*(base * k), alpha) for k in shade for _ in range(3)]
             e.triangles.append(t); up.entities.append(e)
         return up
 
