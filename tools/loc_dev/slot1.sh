@@ -22,7 +22,7 @@ RUNS=runs_loc
 COURSE=planner/config/course_v3.yaml
 
 rtf() {  # Gazebo real-time factor now (runs below ~0.9 are invalid for timing/dynamics)
-  GZ_PARTITION=sim1 timeout 10 gz topic -e -t /world/dronehacks_course/stats -n 1 2>/dev/null | grep -m1 real_time_factor | awk '{print $2}'
+  GZ_PARTITION=sim1 timeout 5 gz topic -e -t /world/dronehacks_course/stats 2>/dev/null | grep -m1 real_time_factor | awk '{print $2}'
 }
 
 dexec() { docker exec -e ROS_DOMAIN_ID="$ROS_DOMAIN_ID" -e FASTRTPS_DEFAULT_PROFILES_FILE="$DDS" "$@"; }
