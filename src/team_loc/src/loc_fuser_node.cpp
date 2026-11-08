@@ -378,7 +378,9 @@ class LocFuser : public rclcpp::Node {
     in.moving = vio_.speed() > 0.1 && anchor_.state() == AnchorTracker::State::Frozen;
     in.fix_age_s = t_last_fix_ < 0 ? -1.0 : t - t_last_fix_;
     in.slew_residual_m = slew_residual_m_;
-    in.vio_frozen = sanity_->frozen(t, anchor_.state() == AnchorTracker::State::Frozen);
+    const bool airborne = anchor_.state() == AnchorTracker::State::Frozen;
+    in.vio_frozen = sanity_->frozen(t, airborne);
+    in.vio_static = sanity_->static_pose(t, airborne);
     in.z_disagree_m = sanity_->z_disagreement(t);
     in.max_z_disagree_m = max_z_disagree_m_;
     in.consecutive_rejected = filter_->consecutive_rejected();
@@ -404,7 +406,7 @@ class LocFuser : public rclcpp::Node {
     kv("vio_rate_hz", fmt(in.vio_rate_hz, 1));
     kv("vio_age_s", fmt(std::min(in.vio_age_s, 999.0)));
     kv("vio_jump", in.jump_latched ? "true" : "false");
-    kv("vio_frozen", in.vio_frozen ? "true" : "false");
+    kv("vio_frozen", in.vio_frozen ? "true" : (in.vio_static ? "static" : "false"));
     kv("z_vio_vs_range_m", in.z_disagree_m < 0 ? "unknown" : fmt(in.z_disagree_m));
     kv("dist_since_anchor_m", fmt(vio_.path_length() - path_at_anchor_, 2));
     kv("sigma_xy_m", fmt(sigma_xy_));

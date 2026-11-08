@@ -14,7 +14,8 @@ namespace team_loc {
 
 // ---------------------------------------------------------------------------------------------
 // Pad anchor. T_course_odom = launch_pose * T_odom_base(now)^-1, refreshed while the drone sits on
-// the pad before a flight, frozen at takeoff. Re-enabled by an arming edge (a new run starts with
+// the pad before a flight, frozen at takeoff = PX4 not landed AND moved freeze_motion_m since the last
+// refresh (PX4's land detector can report not-landed on the pad after arming, e.g. throttle centred). Re-enabled by an arming edge (a new run starts with
 // the drone placed on the launch mark and armed there). Never re-anchors after a flight without a
 // new arming, because after landing the drone is on the landing pad, not the launch mark.
 struct AnchorParams {
@@ -58,6 +59,7 @@ class AnchorTracker {
   bool landed_ = false, flown_ = false, armed_ = false, armed_known_ = false;
   Mat3 R_att_ = Mat3::Identity();
   Vec3 p_first_ = Vec3::Zero();
+  Vec3 p_ref_ = Vec3::Zero();   // odom position at the last anchor refresh
   int anchor_count_ = 0;
 };
 
@@ -107,6 +109,7 @@ struct SanityParams {
   double identical_s = 1.0;      // identical poses this long while airborne = frozen
   double window_s = 1.0;         // height-change comparison window
   double max_z_disagree_m = 0.35;
+  double frozen_range_m = 0.15;  // rangefinder change over the window that proves motion
 };
 
 class VioSanity {
@@ -114,9 +117,17 @@ class VioSanity {
   explicit VioSanity(const SanityParams& p) : p_(p) {}
   void on_odom(double t, const Iso3& T_odom_base, double z_course);
   void on_range(double t, double dist_bottom_m);
-  bool frozen(double t, bool airborne) const {
+  // Bit-identical poses for identical_s while airborne (a noiseless sim can do this when still).
+  bool static_pose(double t, bool airborne) const {
     return airborne && have_ && (t - identical_since_) >= p_.identical_s;
   }
+  // Static VIO while the rangefinder says the drone moved: frozen.
+  bool frozen(double t, bool airborne) const {
+    const double r = range_change(t);
+    return static_pose(t, airborne) && r > p_.frozen_range_m;
+  }
+  // |range change| over the last window; -1 if unknown.
+  double range_change(double t) const;
   // |range change - VIO z change| over the last window; -1 if either series is too short.
   double z_disagreement(double t) const;
 
@@ -156,6 +167,7 @@ struct StatusInputs {
   double slew_residual_m = 0;      // estimated minus applied correction (correction enabled only)
   int consecutive_rejected = 0;
   bool vio_frozen = false;
+  bool vio_static = false;
   double z_disagree_m = -1;        // VIO vs rangefinder height change; -1 = unknown
   double max_z_disagree_m = 0.35;
 };

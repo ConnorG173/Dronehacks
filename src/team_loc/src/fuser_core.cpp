@@ -28,6 +28,7 @@ void AnchorTracker::anchor(double t, const Iso3& T_odom_base) {
   }
   Iso3 T_course_base = launch_pose(p_.start_pos, p_.start_heading_rad, p_.base_height_m, tilt);
   T_course_odom_ = anchor_course_odom(T_course_base, T_odom_base);
+  p_ref_ = T_odom_base.translation();
   ++anchor_count_;
 }
 
@@ -36,7 +37,8 @@ bool AnchorTracker::on_odom(double t, const Iso3& T_odom_base, double speed, boo
   const bool still = speed < p_.still_speed_mps;
 
   if (land_known(t)) {
-    if (landed_ && !flown_) {
+    if (flown_) return false;
+    if (landed_) {
       if (state_ == State::Waiting || still) {
         anchor(t, T_odom_base);
         state_ = State::Live;
@@ -44,9 +46,17 @@ bool AnchorTracker::on_odom(double t, const Iso3& T_odom_base, double speed, boo
       }
       return false;
     }
-    if (!landed_ && state_ == State::Live) {  // takeoff
-      state_ = State::Frozen;
-      flown_ = true;
+    // PX4 says not landed. Takeoff only once the drone has really moved since the last refresh.
+    if (state_ == State::Live) {
+      if ((T_odom_base.translation() - p_ref_).norm() >= p_.freeze_motion_m) {
+        state_ = State::Frozen;
+        flown_ = true;
+        return false;
+      }
+      if (still) {
+        anchor(t, T_odom_base);
+        return true;
+      }
     }
     return false;
   }
@@ -135,6 +145,13 @@ bool VioSanity::at(const std::deque<std::pair<double, double>>& d, double t, dou
   return false;
 }
 
+double VioSanity::range_change(double t) const {
+  if (rng_.empty() || t - rng_.back().first > 0.3) return -1;
+  double r0;
+  if (!at(rng_, t - p_.window_s, r0)) return -1;
+  return std::abs(rng_.back().second - r0);
+}
+
 double VioSanity::z_disagreement(double t) const {
   if (zvio_.empty() || rng_.empty()) return -1;
   if (t - zvio_.back().first > 0.3 || t - rng_.back().first > 0.3) return -1;  // stale input
@@ -153,11 +170,12 @@ StatusResult evaluate_status(const StatusInputs& in, const StatusParams& p) {
   if (in.jump_latched) err.push_back("VIO jump");
   if (!in.anchored) err.push_back("not anchored");
   if (in.correction_enabled && in.sigma_xy_m > p.error_sigma_xy_m) err.push_back("sigma_xy too large");
-  if (in.vio_frozen) err.push_back("VIO frozen (identical poses in flight)");
+  if (in.vio_frozen) err.push_back("VIO frozen (static pose, rangefinder moving)");
 
   if (in.vio_ever && in.vio_age_s <= p.vio_timeout_s && in.vio_rate_hz < p.min_rate_hz)
     warn.push_back("VIO rate low");
   if (in.vo_state == 3) warn.push_back("VIO heuristic (vo_state 3)");
+  if (in.vio_static && !in.vio_frozen) warn.push_back("VIO pose static in flight");
   if (in.z_disagree_m > in.max_z_disagree_m) warn.push_back("VIO height disagrees with rangefinder");
   if (in.vo_state == 0) warn.push_back("VIO state unknown (vo_state 0)");
   if (in.correction_enabled) {

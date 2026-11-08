@@ -288,7 +288,8 @@ def main():
     if msgs[T_OUT]:
         est = odom_track(msgs[T_OUT])
         summary["odom_map"], series["odom_map"] = summarize("odom_map", est, gt, cp_t, goal, vio)
-        st = [(tr, m.level) for tr, m in msgs[T_STATUS]]
+        lvl = lambda v: v[0] if isinstance(v, (bytes, bytearray)) else int(v)  # uint8 arrives as bytes
+        st = [(tr, lvl(m.level)) for tr, m in msgs[T_STATUS]]
         if st:
             # Status is stamped by receive time; map est stamps to receive times via est.recv.
             _, eh, _, _, air = series["odom_map"]

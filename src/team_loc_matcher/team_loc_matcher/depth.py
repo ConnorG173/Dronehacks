@@ -40,11 +40,12 @@ class Stereo:
         w, h = size_wh
         self.size = (int(round(w * scale)), int(round(h * scale)))
         K1, K2 = np.asarray(K1, float).reshape(3, 3), np.asarray(K2, float).reshape(3, 3)
-        D1 = np.asarray(D1, float) if len(D1) else np.zeros(5)
-        D2 = np.asarray(D2, float) if len(D2) else np.zeros(5)
-        R_lr, t_lr = np.asarray(R_lr, float), np.asarray(t_lr, float)
-        R = R_lr.T                                        # OpenCV wants X_r = R X_l + T
-        T = -R_lr.T @ t_lr
+        # OpenCV 5 is strict about shapes (4.x accepted these as given): D as 1xN, T as 3x1, float64.
+        D1 = (np.asarray(D1, np.float64) if len(D1) else np.zeros(5)).reshape(1, -1)
+        D2 = (np.asarray(D2, np.float64) if len(D2) else np.zeros(5)).reshape(1, -1)
+        R_lr, t_lr = np.asarray(R_lr, np.float64).reshape(3, 3), np.asarray(t_lr, np.float64).reshape(3)
+        R = np.ascontiguousarray(R_lr.T)                  # OpenCV wants X_r = R X_l + T
+        T = (-R_lr.T @ t_lr).reshape(3, 1)
         R1, R2, P1, P2, _, _, _ = cv2.stereoRectify(K1, D1, K2, D2, (w, h), R, T,
                                                     flags=cv2.CALIB_ZERO_DISPARITY, alpha=0,
                                                     newImageSize=self.size)

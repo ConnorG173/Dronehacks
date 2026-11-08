@@ -169,7 +169,8 @@ TEST(Sanity, FrozenVioAndRangefinderDisagreement) {
     s.on_range(t, 0.1 + 0.8 * t);
   }
   EXPECT_FALSE(s.frozen(1.32, false));     // on the ground: a still pose is normal
-  EXPECT_TRUE(s.frozen(1.32, true));
+  EXPECT_TRUE(s.static_pose(1.32, true));
+  EXPECT_TRUE(s.frozen(1.32, true));       // static VIO while the rangefinder climbs
   EXPECT_GT(s.z_disagreement(1.32), 0.7);
   // Healthy: VIO and rangefinder climb together, tiny jitter.
   VioSanity h(SanityParams{});
@@ -192,4 +193,32 @@ TEST(Sanity, FrozenVioAndRangefinderDisagreement) {
   in.vio_frozen = false;
   in.z_disagree_m = 0.5;
   EXPECT_EQ(evaluate_status(in, p).level, 1);
+  in.z_disagree_m = -1;
+  in.vio_static = true;                    // static but no evidence of motion: WARN only
+  EXPECT_EQ(evaluate_status(in, p).level, 1);
+}
+
+TEST(Sanity, StaticOnTheGroundWithConstantRangeIsNotFrozen) {
+  VioSanity s(SanityParams{});
+  for (int i = 0; i <= 40; ++i) {
+    s.on_odom(i * 0.033, at(0, 0), 0.0);
+    s.on_range(i * 0.033, 0.12);
+  }
+  EXPECT_TRUE(s.static_pose(1.32, true));
+  EXPECT_FALSE(s.frozen(1.32, true));
+}
+
+TEST(Anchor, NotLandedOnThePadKeepsRefreshingUntilRealMotion) {
+  // PX4 reports not-landed after arming with the throttle centred, still on the pad.
+  AnchorTracker a(params());
+  a.on_landed(0, true);
+  ASSERT_TRUE(a.on_odom(0, at(5, 5), 0.0, true));
+  a.on_landed(0.5, false);
+  EXPECT_TRUE(a.on_odom(0.5, at(5.02, 5), 0.0, true));     // still on the pad: refresh, not frozen
+  EXPECT_EQ(a.state(), AnchorTracker::State::Live);
+  EXPECT_FALSE(a.on_odom(0.8, at(5.08, 5), 0.3, true));    // moving but < 10 cm: neither
+  EXPECT_EQ(a.state(), AnchorTracker::State::Live);
+  EXPECT_FALSE(a.on_odom(1.0, at(5.2, 5), 0.3, true));     // 18 cm: takeoff
+  EXPECT_EQ(a.state(), AnchorTracker::State::Frozen);
+  EXPECT_TRUE(course_pos(a, at(5.02, 5)).isApprox(Vec3(-2.5, 0.9, 0.1), 1e-9));
 }
