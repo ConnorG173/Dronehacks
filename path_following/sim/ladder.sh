@@ -16,5 +16,6 @@ for k in $(seq 1 "$n"); do
   lag=$(grep -m1 "^xy: tau_v" "$m" 2>/dev/null)
   echo "== $run | $score"
   echo "   $vio | $lag"
+  echo "   $(cat "$REPO/path_following/runs/sim/$run/rtf_summary.txt" 2>/dev/null)"
   grep -E "pilot go failed|POSE FAULT|no plan after|WARNING: still no ground truth" /tmp/${run}.out /tmp/${run}.reset | head -3
 done

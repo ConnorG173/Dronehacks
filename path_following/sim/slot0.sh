@@ -60,12 +60,18 @@ fly)
     echo "no plan after 120 s"; tail -20 "$REPO/$out/launch.log"; exit 1
   fi
   sleep 2
+  # Gazebo real-time factor during the flight: a starved VM (RTF << 1) makes wall-clock tracking look laggy
+  ( while :; do GZ_PARTITION=$GZ_PARTITION timeout 6 gz topic -e -n 1 -t /stats 2>/dev/null \
+      | awk '/real_time_factor/ {print $2}' >> "$REPO/$out/rtf.txt"; sleep 4; done ) &
+  RTF_PID=$!
   echo "--- pilot go"
   timeout 150 python3 "$REPO/sim/pilot.py" --sim 0 go || echo "pilot go failed"
   ok=0
   python3 "$REPO/path_following/sim/wait_mission.py" 180 && ok=1
   if [ "$ok" != 1 ]; then timeout 30 python3 "$REPO/sim/pilot.py" --sim 0 land || true; fi
   dexec "$CONTAINER" pkill -INT -f "ros2 bag record" || true
+  kill $RTF_PID 2>/dev/null || true
+  python3 -c "import sys; v=[float(x) for x in open(sys.argv[1]) if x.strip()]; print(f'gazebo RTF during flight: mean {sum(v)/len(v):.2f} min {min(v):.2f} ({len(v)} samples)' + ('  ** RUN INVALID FOR TIMING (RTF < 0.9) **' if sum(v)/len(v) < 0.9 else '')) if v else print('gazebo RTF: no samples')" "$REPO/$out/rtf.txt" 2>/dev/null | tee "$REPO/$out/rtf_summary.txt"
   sleep 3
   dexec "$CONTAINER" bash -lc "$IN_C && python3 path_following/tools/eval_bag.py $out/bag $COURSE $out/plan/path.bin \
     --name '$name' --notes '$mode $*' --via '$CP_VIA' --append $out/results_row.md; python3 path_following/tools/fit_lag.py $out/bag; python3 path_following/tools/vio_err.py $out/bag" \
@@ -85,6 +91,10 @@ sysid)
     /skybeta/setpoint/twist /skybeta/state /team/mission/state /team/tracker/debug /fmu/in/trajectory_setpoint \
     /fmu/out/vehicle_local_position >/root/team/$out/bag.log 2>&1"
   sleep 8
+  # Gazebo real-time factor during the flight: a starved VM (RTF << 1) makes wall-clock tracking look laggy
+  ( while :; do GZ_PARTITION=$GZ_PARTITION timeout 6 gz topic -e -n 1 -t /stats 2>/dev/null \
+      | awk '/real_time_factor/ {print $2}' >> "$REPO/$out/rtf.txt"; sleep 4; done ) &
+  RTF_PID=$!
   echo "--- pilot go"
   timeout 150 python3 "$REPO/sim/pilot.py" --sim 0 go || echo "pilot go failed"
   ok=0
