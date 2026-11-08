@@ -53,7 +53,7 @@ bash build.sh        # package + planner into the kit's own build/install (about
    - planner and package OK;
    - exactly 1 flight_interface;
    - no mission_tracker running;
-   - VIO at about 30 Hz;
+   - VIO at 30–60 Hz;
    - no `/skybeta/setpoint/pose`;
    - PX4 local position flowing;
    - the topic PX4 fuses, and if the heading fix is on, `calibrated: true`.
