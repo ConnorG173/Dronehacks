@@ -66,7 +66,7 @@ fly)
   dexec "$CONTAINER" pkill -INT -f "ros2 bag record" || true
   sleep 3
   dexec "$CONTAINER" bash -lc "$IN_C && python3 path_following/tools/eval_bag.py $out/bag $COURSE $out/plan/path.bin \
-    --name '$name' --notes '$mode $*' --append $out/results_row.md; python3 path_following/tools/fit_lag.py $out/bag" \
+    --name '$name' --notes '$mode $*' --append $out/results_row.md; python3 path_following/tools/fit_lag.py $out/bag; python3 path_following/tools/vio_err.py $out/bag" \
     | tee "$REPO/$out/metrics.txt"
   ;;
 sysid)
