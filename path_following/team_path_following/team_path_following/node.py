@@ -113,6 +113,10 @@ class MissionTracker(Node):
         d('latency_comp_s', 0.06)          # pose age assumed at arrival (VIO pipeline)
         d('vel_agree_mps', 0.8)            # EKF2 velocity used only within this of the pose's velocity
         d('pose_timeout_s', 0.25)
+        d('fi_state_timeout_s', 0.5)       # /skybeta/state older than this = no flight authority (review item 1)
+        d('stamp_max_age_s', 1.0)          # pose header.stamp in our clock domain older than this = stale
+        d('dashboard_coexist', False)      # drone 12 dashboard: publish only while flying, yield to any
+                                           # dashboard pose or interface Hold, capture the frame at arming
         d('pose_jump_m', 0.25)             # pose jump guard slack (m) over max_speed+1 m/s motion; 0 = off
         d('max_speed_mps', 1.5)            # must match the flight interface's
         d('speed_margin_mps', 0.1)
@@ -153,6 +157,12 @@ class MissionTracker(Node):
         self.t_map_odom = None    # frames.Pose2, latest known
         self.t_map_odom_src = 'none'
         self.go_captured = False
+        self.fi_state_rx = None   # receipt time of /skybeta/state
+        self.foreign_pose_t = None  # last /skybeta/setpoint/pose from anyone (we never send poses)
+        self.yielded = None       # reason, once we handed control back
+        self.flight_t0 = None     # first published twist of this flight (dashboard_coexist)
+        self._stamps = {}         # topic -> last header stamp (s): drop duplicates/regressions
+        self._stamp_domain = {}   # topic -> True if header stamps share our clock
 
         sensor_qos = QoSProfile(reliability=QoSReliabilityPolicy.BEST_EFFORT,
                                 durability=QoSDurabilityPolicy.VOLATILE,
@@ -165,6 +175,8 @@ class MissionTracker(Node):
             self.create_subscription(Odometry, gp('vio_topic'), self.vio_cb, 10)
         self.create_subscription(DiagnosticStatus, '/team/loc/status', self.loc_cb, 10)
         self.create_subscription(String, '/skybeta/state', self.fi_state_cb, 10)
+        if gp('dashboard_coexist'):
+            self.create_subscription(PoseStamped, '/skybeta/setpoint/pose', self.foreign_pose_cb, 10)
         if gp('use_px4_velocity') and VehicleLocalPosition is not None:
             px4_qos = QoSProfile(reliability=QoSReliabilityPolicy.BEST_EFFORT,
                                  durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
@@ -316,7 +328,8 @@ class MissionTracker(Node):
         if msg.header.frame_id and msg.header.frame_id != want and not getattr(self, '_frame_warned', False):
             self._frame_warned = True
             self.get_logger().warn(f'{self.gp("pose_topic")} frame_id "{msg.header.frame_id}", expected "{want}"')
-        s = _odom_to_sample(msg, self.now())
+        rx = self._rx_from_stamp('pose', msg)
+        s = None if rx is None else _odom_to_sample(msg, rx)
         if s is not None:
             if self.jump_guard is not None and self.jump_guard.fault is None:
                 if self.jump_guard.update(s.p, s.rx) is not None:
@@ -324,8 +337,39 @@ class MissionTracker(Node):
                                             'aborting (in flight: descend in place)')
             self.pose = s
 
+    def _rx_from_stamp(self, key, msg):
+        """Review item 3: effective sample time from header.stamp, not just arrival.
+
+        Duplicate or regressing stamps are dropped. If the stamps share our clock (checked on the first
+        sample), the sample's time is now - source age, so the pose timeout measures data age. Otherwise
+        (e.g. sim stamps on a wall-clock node) arrival time is used, as before."""
+        now = self.now()
+        st = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        if st <= 0.0:
+            return now
+        last = self._stamps.get(key)
+        if last is not None and st <= last:
+            return None
+        self._stamps[key] = st
+        src_age = self.get_clock().now().nanoseconds * 1e-9 - st
+        if key not in self._stamp_domain:
+            self._stamp_domain[key] = -0.5 < src_age < self.gp('stamp_max_age_s')
+            if not self._stamp_domain[key]:
+                self.get_logger().warn(f'{key} stamps are not on this node\'s clock (offset {src_age:.1f} s): '
+                                       'pose age measured from arrival')
+        if self._stamp_domain[key]:
+            return now - max(0.0, src_age)
+        return now
+
+    def foreign_pose_cb(self, msg):
+        del msg
+        self.foreign_pose_t = self.now()
+
     def vio_cb(self, msg):
-        s = _odom_to_sample(msg, self.now())
+        rx = self._rx_from_stamp('vio', msg)
+        if rx is None:
+            return
+        s = _odom_to_sample(msg, rx)
         if s is not None:
             self.vio = s
 
@@ -350,6 +394,7 @@ class MissionTracker(Node):
             self.fi_state = json.loads(msg.data)
         except ValueError:
             return
+        self.fi_state_rx = self.now()
         if self.fi_state.get('clamped') and self.now() - self._last_clamp_warn > 2.0:
             self._last_clamp_warn = self.now()
             self.get_logger().warn(f'flight interface clamped our setpoint: {self.fi_state["clamped"]}')
@@ -417,8 +462,27 @@ class MissionTracker(Node):
         now = self.now()
         self.update_map_odom()
         fs = self.fi_state
-        offboard = bool(fs.get('offboard_active', False))
-        if offboard and not self.go_captured:
+        # review item 1: authority only from a fresh state report with a live PX4 link
+        fresh = (self.fi_state_rx is not None and now - self.fi_state_rx < self.gp('fi_state_timeout_s')
+                 and fs.get('px4_link', True) is not False)
+        offboard = fresh and bool(fs.get('offboard_active', False))
+        armed = fresh and bool(fs.get('armed', False))
+        coexist = self.gp('dashboard_coexist')
+        if coexist:
+            flying = self.mission.state in ('takeoff', 'course', 'landing', 'landed')
+            if flying and self.yielded is None and self.flight_t0 is not None:
+                reason = None
+                if self.foreign_pose_t is not None and self.foreign_pose_t > self.flight_t0:
+                    reason = 'dashboard pose setpoint'
+                elif fs.get('frozen') and self.fi_state_rx is not None and self.fi_state_rx > self.flight_t0 + 0.3:
+                    reason = 'flight interface Hold'
+                if reason is not None:
+                    self.yielded = reason
+                    self.mission.yield_control(now, reason)
+                    self.get_logger().warn(f'YIELDED to {reason}: publishing nothing from now on')
+            if self.mission.state == 'idle' and self.foreign_pose_t is not None and now - self.foreign_pose_t < 2.0:
+                offboard = False   # the dashboard is commanding: never take off under it
+        if offboard and not self.go_captured and (armed or not coexist):
             self.go_captured = True
             self.get_logger().info(f'go: course->odom {self.t_map_odom} ({self.t_map_odom_src})')
         pos, vel, yaw, age, src = self.current_pose(now)
@@ -427,7 +491,7 @@ class MissionTracker(Node):
             clear = self.clearance.distance(pos)
             cscale = self.clearance.speed_scale(pos, self.gp('clearance_slow_m'), self.gp('clearance_stop_m'))
         out = self.mission.step(self.dt, Inputs(
-            now=now, offboard=offboard, armed=bool(fs.get('armed', False)), landed=fs.get('landed'),
+            now=now, offboard=offboard, armed=armed, landed=fs.get('landed'),
             pos=pos, vel=vel, yaw=yaw, pose_age=age, loc_level=self.loc_level, clearance_scale=cscale,
             pose_fault=self.jump_guard.fault if self.jump_guard is not None else None))
         if out.note:
@@ -447,7 +511,12 @@ class MissionTracker(Node):
         msg.header.frame_id = 'odom'
         msg.twist.linear.x, msg.twist.linear.y, msg.twist.linear.z = (float(c) for c in v_odom)
         msg.twist.angular.z = float(out.yaw_rate) if math.isfinite(out.yaw_rate) else 0.0
-        self.twist_pub.publish(msg)
+        # dashboard_coexist: a twist overrides the interface's hold and the dashboard's commands, so send one
+        # only while we fly (never idle, aborted, yielded or done)
+        if not coexist or (self.yielded is None and out.state in ('takeoff', 'course', 'landing', 'landed')):
+            if coexist and self.flight_t0 is None:
+                self.flight_t0 = now
+            self.twist_pub.publish(msg)
 
         dbg = out.debug
         ref = dbg.get('p_ref', [math.nan] * 3)

@@ -134,6 +134,12 @@ class Mission:
         self.t_settled = self.t_height = self.t_finished = None
         self._go(now, TAKEOFF, 'return: touch-and-go')
 
+    def yield_control(self, now, reason):
+        """Another controller (the dashboard, a Hold) took over: stop for good, no fault descent."""
+        if self.state not in (DONE, ABORT):
+            self.fault_land = False
+            self._go(now, ABORT, f'yielded: {reason}')
+
     def step(self, dt, s):
         if self.t_state is None:
             self.t_state = s.now
@@ -150,6 +156,8 @@ class Mission:
             # on the pad: never take off. The pilot takes over either way.
             self.fault_land = self.state != IDLE
             self._go(s.now, ABORT, f'pose fault: {s.pose_fault}')
+        if self.state == ABORT and self.fault_land and not s.offboard:
+            self.fault_land = False     # review item 2: the pilot has authority; never command again
         if self.state == ABORT and self.fault_land and s.armed and not s.landed:
             return Output(np.array([0.0, 0.0, -self.p.land_vz_slow]), 0.0, self.public_state,
                           'pose fault: descending in place, pilot take over')

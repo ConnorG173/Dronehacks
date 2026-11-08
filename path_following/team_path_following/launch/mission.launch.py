@@ -61,6 +61,10 @@ OUR_ARGUMENTS = [
     ('return_z_ceiling_m', '1.6', 'map z ceiling on the return leg'),
     ('out_dir', '/tmp/team_path_following', 'planner output directory'),
     ('tracker_use_sim_time', 'false', 'SIM ONLY: mission_tracker on /clock (flight_interface stays on wall time)'),
+    ('start_flight_interface', 'true', 'false: use a flight interface that is already running (drone 12 dashboard)'),
+    ('dashboard_coexist', 'false', 'true: publish only while flying, yield to dashboard poses / interface Hold'),
+    ('px4_local_position_topic', '/fmu/out/vehicle_local_position', 'PX4 local position (EKF2 velocity)'),
+    ('vio_topic', '/visual_slam/tracking/odometry', 'fallback pose when pose_topic is stale; = pose_topic disables it'),
 ]
 
 
@@ -105,6 +109,9 @@ def _nodes(context):
         'return_z_ceiling_m': float(lc('return_z_ceiling_m')),
         'out_dir': lc('out_dir'),
         'use_sim_time': lc('tracker_use_sim_time').lower() == 'true',
+        'dashboard_coexist': lc('dashboard_coexist').lower() == 'true',
+        'px4_local_position_topic': lc('px4_local_position_topic'),
+        'vio_topic': lc('vio_topic'),
     })
     tracker = Node(
         package='team_path_following',
@@ -114,6 +121,8 @@ def _nodes(context):
         emulate_tty=True,
         parameters=params,
     )
+    if lc('start_flight_interface').lower() != 'true':
+        return [tracker]
     return [flight_interface, tracker]
 
 

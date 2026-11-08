@@ -105,3 +105,28 @@ def test_pose_fault_aborts_and_descends():
     assert m.state == ABORT and out.v[2] < 0 and abs(out.v[0]) + abs(out.v[1]) == 0.0
     out = m.step(0.02, Inputs(now=0.04, pose_fault='jump', **{**s, 'landed': True}))
     assert np.allclose(out.v, 0.0)
+
+
+def test_fault_descent_stops_once_offboard_is_lost():
+    """Review item 2: after a pose fault, losing Offboard ends the descent for good."""
+    m = Mission(line_traj(), pad_z=0.0)
+    s = dict(offboard=True, armed=True, landed=False, pos=np.array([0.0, 0.0, 0.5]), vel=np.zeros(3), yaw=0.0)
+    m.step(0.02, Inputs(now=0.0, **s))
+    out = m.step(0.02, Inputs(now=0.02, pose_fault='jump', **s))
+    assert m.state == ABORT and out.v[2] < 0
+    out = m.step(0.02, Inputs(now=0.04, pose_fault='jump', **{**s, 'offboard': False}))
+    assert np.allclose(out.v, 0.0)
+    out = m.step(0.02, Inputs(now=0.06, pose_fault='jump', **s))   # Offboard back: still no command
+    assert np.allclose(out.v, 0.0) and m.state == ABORT
+
+
+def test_yield_control_latches_silent_abort():
+    m = Mission(line_traj(), pad_z=0.0)
+    s = dict(offboard=True, armed=True, landed=False, pos=np.array([0.0, 0.0, 0.5]), vel=np.zeros(3), yaw=0.0)
+    m.step(0.02, Inputs(now=0.0, **s))
+    assert m.state == TAKEOFF
+    m.yield_control(0.02, 'dashboard pose setpoint')
+    out = m.step(0.02, Inputs(now=0.04, **s))
+    assert m.state == ABORT and np.allclose(out.v, 0.0) and not m.fault_land
+    m.yield_control(0.06, 'again')          # idempotent once aborted
+    assert m.events[-1][2] == 'yielded: dashboard pose setpoint'
