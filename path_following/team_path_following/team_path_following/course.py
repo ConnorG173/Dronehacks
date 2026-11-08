@@ -112,6 +112,12 @@ class Course:
                         shutil.copyfile(full, local)
                         value = os.path.basename(local)
                 handle.write(f'{key}: {value}\n')
+            # overrides for keys the config does not have (e.g. DilateShape): appended; the planner
+            # rejects unknown keys, so a typo fails loudly instead of being ignored
+            present = {k for k, _ in self.lines}
+            for key, value in overrides.items():
+                if key not in present and key not in drop:
+                    handle.write(f'{key}: {value}\n')
 
 
 def load_course(path):
