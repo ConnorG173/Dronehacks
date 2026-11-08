@@ -43,6 +43,27 @@ class Box:
     def contains(self, p):
         return bool(np.all(np.abs(np.asarray(p) - self.center) <= self.half))
 
+    def distance(self, p):
+        """Distance from each point (N x 3) to the box (0 inside)."""
+        return np.linalg.norm(np.maximum(np.abs(np.atleast_2d(p) - self.center) - self.half, 0.0), axis=1)
+
+
+def score_checkpoints(points, boxes):
+    """Checkpoints passed in flight order, a missed one skipped (not the end of the count).
+    Returns (passed flags per box, closest approach per box in m)."""
+    pts = np.atleast_2d(np.asarray(points, float))
+    passed, miss, i = [], [], 0
+    for b in boxes:
+        d = b.distance(pts) if len(pts) else np.array([np.inf])
+        miss.append(float(np.min(d)))
+        inside = np.flatnonzero(d[i:] <= 0.0) if len(pts) else []
+        if len(inside):
+            passed.append(True)
+            i += int(inside[0])
+        else:
+            passed.append(False)
+    return passed, miss
+
 
 @dataclass
 class Course:

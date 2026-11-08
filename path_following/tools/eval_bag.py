@@ -16,7 +16,7 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'team_path_following'))
 from team_path_following.clearance import ClearanceMap  # noqa: E402
-from team_path_following.course import load_course, read_dhmap  # noqa: E402
+from team_path_following.course import load_course, read_dhmap, score_checkpoints  # noqa: E402
 from team_path_following.pathfile import Trajectory  # noqa: E402
 
 
@@ -64,15 +64,8 @@ def evaluate(bag, course, traj, radius=0.20):
     # cross-track: distance to the plan polyline (nearest sample)
     xt = np.array([np.min(np.linalg.norm(traj.p - q, axis=1)) for q in p[inc]]) if inc.any() else np.array([np.nan])
     fly = (t >= (t0 or np.inf)) & (t <= (tl or t[-1]))
-    hit, k = 0, 0
-    worst = 0.0
-    for b in course.checkpoints:
-        out = np.linalg.norm(np.maximum(np.abs(p[fly] - b.center) - b.half, 0.0), axis=1) if fly.any() else [np.inf]
-        worst = max(worst, float(np.min(out)))
-    for q in p[fly]:
-        if k < len(course.checkpoints) and course.checkpoints[k].contains(q):
-            k += 1
-    hit = k
+    passed, miss = score_checkpoints(p[fly], course.checkpoints)
+    hit, worst = sum(passed), (max(miss) if miss else 0.0)
     touches = int(np.sum(np.diff((c < radius).astype(int)) == 1) + (1 if len(c) and c[0] < radius else 0))
     return dict(
         result=st[-1][1].data if st else '?',
@@ -84,6 +77,7 @@ def evaluate(bag, course, traj, radius=0.20):
         min_clear_m=round(float(np.nanmin(c)), 3),
         touches=touches,
         checkpoints=f'{hit}/{len(course.checkpoints)}',
+        cp_missed=[i + 1 for i, ok in enumerate(passed) if not ok],
         cp_worst_miss_m=round(worst, 3),
         land_err_m=round(float(np.linalg.norm(p[-1, :2] - traj.p[-1, :2])), 3),
     )

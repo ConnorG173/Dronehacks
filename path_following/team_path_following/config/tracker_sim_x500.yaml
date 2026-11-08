@@ -1,4 +1,4 @@
-# SIM ONLY (Gazebo x500): tau_v / t_delay fitted with tools/fit_lag.py on run gt02 (pre-collision window).
+# SIM ONLY (Gazebo x500): tau_v from tools/fit_lag.py on run gt10 (0.66 s; dead time fit 0.24 first-order, 0.12 second-order); t_delay 0.18 best in kinsim on a plant matched to that fit.
 # PX4 velocity-loop parameters; re-fit tau_v / t_delay from sim and real logs
 # (tools/fit_lag.py) before trusting them. See docs/results/path_following.md.
 mission_tracker:
@@ -11,8 +11,8 @@ mission_tracker:
     clearance_slow_m: 0.0        # 0 = off
     clearance_stop_m: 0.0
     tracker.ff_mode: inverse
-    tracker.tau_v: 0.65
-    tracker.t_delay: 0.12
+    tracker.tau_v: 0.66
+    tracker.t_delay: 0.18
     tracker.kc: 1.2
     tracker.ka: 0.6
     tracker.kz: 1.5

@@ -27,7 +27,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'team_path_following'))
 
 from team_path_following import frames  # noqa: E402
-from team_path_following.course import load_course, read_dhmap  # noqa: E402
+from team_path_following.course import load_course, read_dhmap, score_checkpoints  # noqa: E402
 from team_path_following.clearance import ClearanceMap  # noqa: E402
 from team_path_following.mission import Mission, MissionParams, Inputs, COURSE, LANDING, DONE, ABORT  # noqa: E402
 from team_path_following.pathfile import Trajectory  # noqa: E402
@@ -178,9 +178,7 @@ def run(course, traj, tracker_params=None, mission_params=None, sim=None, cleara
     offboard = False
     t_offboard = 0.5          # pilot "go" shortly after start
     log = []
-    cps_hit = []
-    cp_next = 0
-    cp_miss = [float('inf')] * len(course.checkpoints)   # closest approach outside each box
+    cp_pts = []                # positions during the course leg, scored after the run
     min_clear = float('inf')
     touches = 0
     touching = False
@@ -274,13 +272,7 @@ def run(course, traj, tracker_params=None, mission_params=None, sim=None, cleara
             max_xt = max(max_xt, xt)
             xt_sq.append(xt * xt)
         if mission.state in (COURSE, LANDING) and mission.leg == 0:
-            for k, b in enumerate(course.checkpoints):
-                out = np.maximum(np.abs(px4.p - b.center) - b.half, 0.0)
-                cp_miss[k] = min(cp_miss[k], float(np.linalg.norm(out)))
-        if mission.state in (COURSE, LANDING) and mission.leg == 0 and cp_next < len(course.checkpoints):
-            if course.checkpoints[cp_next].contains(px4.p):
-                cps_hit.append(t)
-                cp_next += 1
+            cp_pts.append(px4.p.copy())
         t += sp.dt
 
     ev = {}
@@ -289,6 +281,7 @@ def run(course, traj, tracker_params=None, mission_params=None, sim=None, cleara
     landed_all = [tt for tt, s_, _ in mission.events if s_ == 'landed']
     t_course = ev.get(LANDING, np.nan) - ev.get(COURSE, np.nan)
     land_err = float(np.linalg.norm((first_land_pos if first_land_pos is not None else px4.p)[:2] - traj.p[-1][:2]))
+    cp_passed, cp_miss = score_checkpoints(cp_pts, course.checkpoints)
     res = dict(
         result=mission.state,
         course_time_s=round(float(t_course), 2),
@@ -299,7 +292,8 @@ def run(course, traj, tracker_params=None, mission_params=None, sim=None, cleara
         min_clear_m=round(min_clear, 3),
         plan_min_clear_m=round(float(np.min(clearance.distance(traj.p))), 3),
         touches=touches,
-        checkpoints=f'{cp_next}/{len(course.checkpoints)}',
+        checkpoints=f'{sum(cp_passed)}/{len(course.checkpoints)}',
+        cp_missed=[i + 1 for i, ok in enumerate(cp_passed) if not ok],
         cp_worst_miss_m=round(max(cp_miss), 3) if cp_miss else 0.0,
         clamped_ticks=clamped,
         land_err_m=round(land_err, 3),
