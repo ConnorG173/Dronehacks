@@ -46,16 +46,16 @@ def transform(points, scale, up, yaw_deg, translate):
     return p + np.asarray(translate, dtype=float)
 
 
-def make_texture(seed, size=1024):
+def make_texture(seed, size=2048):
     """High-contrast blotches + rectangles + fine noise: lots of corners for feature tracking."""
     rng = np.random.default_rng(seed)
     hue = rng.uniform(0, 1)
     base = np.array([0.55 + 0.35 * math.sin(2 * math.pi * (hue + k / 3)) for k in range(3)]) * 255
     img = Image.new("RGB", (size, size), tuple(int(x) for x in base * 0.8))
     d = ImageDraw.Draw(img)
-    for _ in range(260):
+    for _ in range(3500):   # dense: one texture spans --tile metres (2.5 m), so keep features ~1-10 cm
         x, y = rng.integers(0, size, 2)
-        w, h = rng.integers(8, 90, 2)
+        w, h = rng.integers(6, 48, 2)
         shade = rng.uniform(0.15, 1.0)
         col = tuple(int(min(255, c * shade + rng.uniform(-30, 30))) for c in base)
         if rng.random() < 0.5:
@@ -89,7 +89,9 @@ def write_obj(meshes_by_mat, out_dir, tile):
     obj_lines, mtl_lines = ["mtllib course.mtl"], []
     v_off = 1
     n_off = 1
+    rng = np.random.default_rng(12345)
     for mat, meshes in meshes_by_mat.items():
+        uv_off = rng.uniform(0, 1, 2)   # per-material pattern offset, so adjacent parts never line up
         tex = f"{mat}.png"
         mtl_lines += [f"newmtl {mat}", "Ka 0 0 0", "Kd 1 1 1", "Ks 0.05 0.05 0.05", "Ns 10",
                       "d 1", "illum 2", f"map_Kd {tex}", ""]
@@ -98,7 +100,7 @@ def write_obj(meshes_by_mat, out_dir, tile):
         for m in meshes:
             for face in m.faces:
                 pts = m.vertices[face]
-                uv = triplanar_uv(pts, tile)
+                uv = triplanar_uv(pts, tile) + uv_off
                 for p in pts:
                     obj_lines.append(f"v {p[0]:.5f} {p[1]:.5f} {p[2]:.5f}")
                 for t in uv:
@@ -162,8 +164,8 @@ def main():
     ap.add_argument("--yaw-deg", type=float, default=0.0)
     ap.add_argument("--translate", type=float, nargs=3, default=[0.0, 0.0, 0.0])
     ap.add_argument("--tol-mm", type=float, default=2.0, help="tessellation tolerance in CAD units")
-    ap.add_argument("--tile", type=float, default=0.6, help="texture repeat (m)")
-    ap.add_argument("--textures", type=int, default=6)
+    ap.add_argument("--tile", type=float, default=2.5, help="texture repeat (m); large so a wall shows no repeats")
+    ap.add_argument("--textures", type=int, default=0, help="distinct textures; 0 = one unique texture per solid")
     ap.add_argument("--floor-half", type=float, default=4.0, help="half-size of the added floor slab (m)")
     ap.add_argument("--seed", type=int, default=7)
     a = ap.parse_args()
@@ -175,7 +177,10 @@ def main():
     for i, m in enumerate(solids):
         m.vertices = transform(np.asarray(m.vertices), a.scale, a.up, a.yaw_deg, a.translate)
         lo, hi = np.minimum(lo, m.vertices.min(0)), np.maximum(hi, m.vertices.max(0))
-        meshes_by_mat.setdefault(f"tex{i % a.textures}", []).append(m)
+        # One unique texture per solid (default): with a few shared, tiled textures, walls in different places
+        # looked identical, and cuVSLAM snapped between them (VIO jumps of 0.3-8 m at the same spot every flight).
+        k = i % a.textures if a.textures > 0 else i
+        meshes_by_mat.setdefault(f"tex{k}", []).append(m)
     print("course bounds (map frame, m):", np.round(lo, 3), np.round(hi, 3))
     floor_z = max(lo[2], 0.0) if lo[2] > -0.05 else 0.0
     meshes_by_mat["floor"] = [floor_slab(((-a.floor_half, -a.floor_half), (a.floor_half, a.floor_half)), floor_z - 0.001)]
