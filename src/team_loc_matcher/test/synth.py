@@ -22,7 +22,7 @@ def _dedupe(q, res):
 
 def render(world, origin, res, pose, fov_deg=72.0, n_rays=120, rmin=0.3, rmax=5.0, noise=0.01,
            rng=None, room=0.0, cage_half=3.049, edge_only=False, edge_jump=0.15, keep_frac=0.03,
-           free_stop=0.10, noise_k=0.0):
+           free_stop=0.10, noise_k=0.0, net_return=0.0):
     """One frame from pose (x, y, yaw) -> (wall_pts, free_pts) in the body frame (deduped)."""
     rng = rng or np.random.default_rng(0)
     x, y, yaw = pose
@@ -41,6 +41,13 @@ def render(world, origin, res, pose, fov_deg=72.0, n_rays=120, rmin=0.3, rmax=5.
     for k in np.nonzero(has)[0]:
         c = origin + (ijc[k, first[k]] + 0.5) * res                       # hit cell centre
         r[k] = float((c - (x, y)) @ d[k])                                 # its projection on the ray
+    # the net itself may return (opaque in the sim): a ray leaving the cage returns ON it
+    if net_return > 0:
+        out = np.abs(P).max(2) > cage_half
+        for k in np.nonzero(~has & out.any(1))[0]:
+            if rng.random() < net_return:
+                r[k] = s[np.argmax(out[k])]
+                has[k] = True
     # see-through net: rays that leave the cage without a hit may return from beyond it
     if room > 0:
         out = np.abs(P).max(2) > cage_half

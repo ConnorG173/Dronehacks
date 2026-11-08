@@ -101,7 +101,8 @@ def _dist_to(mask, res, chunk=4096):
 
 
 def build_wallgrid(points, start_xy, start_heading_rad=0.0, bound_xy=None, res=0.05, band=(0.3, 1.6),
-                   min_span_m=0.15, min_hits=2, net_margin_m=0.15, sigma_m=0.08, floor_z=None):
+                   min_span_m=0.15, min_hits=2, net_margin_m=0.15, sigma_m=0.08, floor_z=None,
+                   net_mode="weak", net_band_m=0.25, net_neutral_lik=0.5):
     """points: (N, 3) map frame. bound_xy: (xmin, xmax, ymin, ymax) of the grid (default: points'
     extent plus 3 cells). floor_z: floor height (default: the lowest 1st percentile of points)."""
     P = np.asarray(points, float)
@@ -146,9 +147,34 @@ def build_wallgrid(points, start_xy, start_heading_rad=0.0, bound_xy=None, res=0
         boundary = occ & _dilate(border, 2)
     near_boundary = _dist_to(boundary, res) <= net_margin_m if boundary.any() else np.zeros_like(occ)
     wall = occ & ~boundary & ~near_boundary
-    cage = ~outside & ~_dilate(boundary, 1)
-    dist = _dist_to(wall, res)
-    lik = np.where(cage, np.exp(-0.5 * (np.minimum(dist, 10 * sigma_m) / sigma_m) ** 2), 0.0)
+    # The cage boundary (nets). Whether it returns depth is unknown on the real course (the sim
+    # renders it opaque; real netting may or may not give stereo points, and the room beyond does).
+    #   invisible: nets are not in the likelihood, and points near them score the floor (prototype).
+    #     In slot 1 (gt05) the matcher then slid scans 0.2-0.4 m to put net points onto interior walls.
+    #   surface:   nets are walls. Fixes the sim, but room returns just beyond a see-through net get
+    #     pulled onto it (synthetic sweep: 28/400 overconfident fixes).
+    #   neutral:   points within net_band_m of the net score a flat net_neutral_lik (safe in synthetic
+    #     tests, but the sim error stays 15 cm).
+    #   weak:      nets are walls at half strength. The default: sim scans 25/37 accepted at 4.2 cm
+    #     median; synthetic sweeps 1/320 marginally overconfident (d2 13), which the fuser gate covers.
+    gauss = lambda d: np.exp(-0.5 * (np.minimum(d, 10 * sigma_m) / sigma_m) ** 2)
+    d_wall = _dist_to(wall, res)
+    if net_mode == "invisible":
+        cage = ~outside & ~_dilate(boundary, 1)
+        lik = np.where(cage, gauss(d_wall), 0.0)
+    else:
+        cage = ~outside | _dilate(boundary, int(round(net_band_m / res)))
+        d_net = _dist_to(boundary, res)
+        if net_mode == "surface":
+            net = gauss(d_net)
+        elif net_mode == "weak":
+            net = 0.5 * gauss(d_net)
+        elif net_mode == "neutral":
+            net = np.where(d_net <= net_band_m, net_neutral_lik, 0.0)
+        else:
+            raise ValueError(f"net_mode {net_mode!r}")
+        lik = np.where(cage, np.maximum(gauss(d_wall), net), 0.0)
+    dist = d_wall
     return {
         "wall": wall, "cage": cage, "boundary": boundary, "lik": lik.astype(np.float32),
         "dist_m": dist.astype(np.float32), "res_m": res, "origin_x": x0, "origin_y": y0,

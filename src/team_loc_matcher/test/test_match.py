@@ -27,7 +27,10 @@ CHI2_3_99 = 11.34
 def course():
     if not os.path.exists(MAP):
         pytest.skip("course map not present")
-    z = wallgrid.build_from_files(MAP, CONFIG)
+    # The synthetic world here has see-through nets (+ room returns), so the map is built with the
+    # matching assumption. The default net model ("weak") is tested against net-returning scans in
+    # test_weak_nets_with_net_returns below; the trade-off is in docs/results/localization.md.
+    z = wallgrid.build_from_files(MAP, CONFIG, net_mode="invisible")
     return CourseMap.from_grid(z), z["wall"], np.array([float(z["origin_x"]), float(z["origin_y"])]), \
         float(z["res_m"]), z["dist_m"]
 
@@ -214,3 +217,23 @@ def test_runtime(course):
     ms = (time.perf_counter() - t) / 5 * 1e3
     print(f"\n  match: {len(W)} wall + {min(len(F), 600)} free pts, 17 yaw x 17 x 17 xy: {ms:.1f} ms")
     assert ms < 150
+
+
+def test_weak_nets_with_net_returns(course):
+    """Default net model ("weak": nets are half-strength walls) on scans whose rays may return ON the
+    net (as in the Gazebo sim) and partly from the room beyond. No accepted fix may be overconfident."""
+    _, world, o, res, dist = course
+    cmap = CourseMap.from_grid(wallgrid.build_from_files(MAP, CONFIG))   # default net_mode
+    accepted, worst = 0, 0.0
+    poses = [p for seed in (40, 41, 42) for p in free_poses(dist, o, res, 40, seed=seed)]
+    for x, y, t, rng in poses:
+        truth = (x, y, t)
+        W, F = synth.stacked(world, o, res, synth.track(truth), room=0.3, net_return=0.5, noise_k=0.012)
+        prior = np.array(truth) + np.r_[rng.uniform(-0.3, 0.3, 2), math.radians(rng.uniform(-6, 6))]
+        r = match(cmap, W, F, prior)
+        if gate(r)[0]:
+            accepted += 1
+            worst = max(worst, d2(r, truth))
+    print(f"\n  weak nets, net returns: accepted {accepted}/{len(poses)}, worst d2 {worst:.1f}")
+    assert worst < CHI2_3_99
+    assert accepted >= 60

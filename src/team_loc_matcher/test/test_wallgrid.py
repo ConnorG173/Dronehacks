@@ -37,10 +37,20 @@ def test_counts_and_start(g):
     assert g["cage"][i, j] and not g["wall"][i, j] and g["dist_m"][i, j] > 0.3
 
 
-def test_net_is_never_wall_and_outside_is_not_cage(g):
+def test_net_is_never_wall_and_weak_in_the_likelihood(g):
     assert not (g["wall"] & g["boundary"]).any()
-    i, j = cell(g, 3.15, 0.0)              # between the net and MapBound
-    assert not g["cage"][i, j] and g["lik"][i, j] == 0
+    i, j = cell(g, 3.05, 0.0)              # on the east net: half a wall (net_mode "weak")
+    assert 0.3 < g["lik"][i, j] <= 0.5 + 1e-6
+    i, j = cell(g, 3.18, 0.0)              # beyond the net: little or nothing
+    assert g["lik"][i, j] < 0.2
+
+
+def test_invisible_nets_mode_keeps_the_prototype_behaviour():
+    if not os.path.exists(MAP):
+        pytest.skip("course map not present")
+    z = wallgrid.build_from_files(MAP, CONFIG, net_mode="invisible")
+    i, j = cell(z, 3.15, 0.0)
+    assert not z["cage"][i, j] and z["lik"][i, j] == 0
 
 
 @pytest.mark.parametrize("name", GAPS)
