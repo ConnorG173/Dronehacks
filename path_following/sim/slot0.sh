@@ -94,14 +94,20 @@ sysid)
   dexec "$CONTAINER" bash -lc "$IN_C && python3 path_following/tools/fit_lag.py $out/bag --states course" | tee "$REPO/$out/metrics.txt"
   ;;
 reset)
-  # fresh world + PX4 (EKF2 restarts itself at 30 s; arm only after ~80 s)
+  # fresh world + PX4. Gazebo loads the course textures (~2 min), EKF2 restarts itself at PX4 up + 30 s:
+  # wait 150 s, then until check_sim reports image contrast OK and xy_valid (at most 3 more minutes)
   tmux kill-window -t "$TMUX_SESSION:team" 2>/dev/null || true
   bash "$REPO/sim/run_sim.sh" 0 stop || true
   sleep 3
   bash "$REPO/sim/run_sim.sh" 0
-  echo "settling 90 s..."
-  sleep 90
-  bash "$REPO/sim/tools/check_sim.sh" 2>&1 | grep -E "rate|xy_valid|armed" | head -8
+  echo "settling 150 s..."
+  sleep 150
+  for _ in $(seq 1 9); do
+    chk=$(bash "$REPO/sim/tools/check_sim.sh" 2>&1 || true)
+    if echo "$chk" | grep -q "^OK" && echo "$chk" | grep -q "xy_valid: true"; then break; fi
+    sleep 20
+  done
+  echo "$chk" | grep -E "rate|xy_valid|armed|^OK|^FAIL" | head -10
   ;;
 stop)
   tmux kill-window -t "$TMUX_SESSION:team" 2>/dev/null || true
