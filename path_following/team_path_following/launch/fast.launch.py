@@ -1,6 +1,11 @@
-"""Frozen drone profile "fast" (2026-11-07): Gazebo candidate 3 (see docs/results/path_following.md).
-Passed the bar in Gazebo (raw VIO, Gate B, 3 clean runs in a row from fresh resets: see
-docs/results/path_following.md). Tuning work must not change it:
+"""Frozen drone profile "fast" (2026-11-08, tag drone-fast-v1): Gazebo candidate 3, frozen on Justin's call that
+the 0.25 m clearance bar is sufficient (the strict 0.29 m prop-reach bar is treated as over-conservative).
+
+Sim evidence (raw VIO, Gate B, fresh resets):
+    candidate 2 = same planner settings without the chicane vias / near-wall re-timing: ld1 24.8 s, c2rep1 25.2 s,
+      both 0 touches at 0.25 m, 5/5 openings, in pad; min clearance 0.25 m, at the chicane channel (0.65, -1.12).
+    candidate 3 = candidate 2 + centreline vias in the chicane + slow-down near walls: kinsim min clearance 0.316 m,
+      ~24 s course. Gazebo runs le1-3 / c3rep1-3 were pending at freeze time: check docs/STATUS.md.
 
     Gate B route with the chicane on its centreline (planner/config/course_v3_gateb2.yaml), Euclidean obstacle
     margin 0.35 m (DilateShape sphere), plan MaxVelMag 1.2 at its own timing, slowed only near walls

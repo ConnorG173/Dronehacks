@@ -102,7 +102,11 @@ ros2 launch team_path_following conservative.launch.py repo_root:=/root/team_ws/
 Gazebo (cons03): done, 0 touches at 0.20 m, minimum clearance 0.30 m, VIO 2.4 cm RMS. That run was
 RTF-starved, so its time (55 s) isn't valid; the plan is about 27 s.
 
-**Faster candidate 3, not frozen** (`fast.launch.py.draft` / `tracker_fast.yaml.draft`). Settings:
+**FROZEN 2026-11-08: `drone-fast-v1` = candidate 3** (`launch/fast.launch.py` / `config/tracker_fast.yaml`, drone lag gains
+0.66/0.18). Justin's call: 0.25 m clearance is enough, so the strict 0.29 m bar is not required. Candidate 2 (same planner, no
+chicane vias or re-timing) flew 24.8 / 25.2 s with 0 touches at 0.25 m. Candidate 3 only adds margin at the chicane. Drone command:
+`ros2 launch team_path_following fast.launch.py repo_root:=/root/team_ws/src/Dronehacks mission_preset:=course pose_topic:=/visual_slam/tracking/odometry pose_topic_frame:=odom base_height_on_pad_m:=<measured>`.
+Fly conservative first (hover, first_leg, course), then fast. Settings:
 `course_v3_gateb2.yaml` (chicane vias on the centreline), sphere margin 0.35, MaxVelMag 1.2, time_scale 1.0,
 clearance re-timing 0.45/0.38/1.6. Sim command:
 
