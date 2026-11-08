@@ -41,6 +41,24 @@ ros2 launch team_path_following conservative.launch.py repo_root:=/root/team_ws/
   pose_topic:=/visual_slam/tracking/odometry pose_topic_frame:=odom base_height_on_pad_m:=<measured>
 ```
 
+**Two frozen profiles (git tags). Fly conservative first, fast only after clean conservative flights:**
+
+| Tag | Launch file | What it flies |
+|---|---|---|
+| `drone-conservative-v1` | `conservative.launch.py` | Gate B route (`course_v3_gateb.yaml`), plan slowed 1.4x, peak ~0.86 m/s, course ~27 s |
+| `drone-fast-v1` | `fast.launch.py` | Gate B route with chicane centreline vias (`course_v3_gateb2.yaml`), sphere margin 0.35 m, plan at full speed (MaxVelMag 1.2) slowed only near walls, course ~24-25 s |
+
+```bash
+ros2 launch team_path_following fast.launch.py repo_root:=/root/team_ws/src/Dronehacks mission_preset:=course \
+  pose_topic:=/visual_slam/tracking/odometry pose_topic_frame:=odom base_height_on_pad_m:=<measured>
+```
+
+Both use the drone lag gains 0.66/0.18 (from Gazebo's x500). Fit the real lag from the conservative flights
+(`fit_lag.py`, section 2) before flying fast. **Pose source:** with the two `pose_topic*` arguments shown, both
+profiles steer directly on the organizers' default cuVSLAM output (`/visual_slam/tracking/odometry`, unchanged
+stack, IMU fusion off). If you leave those arguments out, they default to `/team/odom_map`, which needs team_loc
+running (variant B below).
+
 The long form with `mission.launch.py` is equivalent:
 
 `mission.launch.py` starts the organizers' `flight_interface` with the same arguments and defaults as
