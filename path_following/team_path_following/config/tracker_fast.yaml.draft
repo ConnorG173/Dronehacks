@@ -1,0 +1,36 @@
+# FROZEN profile "fast" (2026-11-07): used by launch/fast.launch.py. = tracker_sim_c3.yaml (Gazebo candidate 3):
+# lag 0.66/0.18 (as tracker_conservative.yaml) + clearance re-timing 0.45/0.38/1.6. Do not tune this file.
+#
+mission_tracker:
+  ros__parameters:
+    control_rate_hz: 50.0
+    speed_margin_mps: 0.1
+    latency_comp_s: 0.06
+    pose_timeout_s: 0.25
+    use_px4_velocity: true
+    clearance_slow_m: 0.0        # 0 = off
+    clearance_stop_m: 0.0
+    retime_slow_below_m: 0.45
+    retime_full_slow_m: 0.38
+    retime_k_max: 1.6
+    tracker.ff_mode: inverse
+    tracker.tau_v: 0.66
+    tracker.t_delay: 0.18
+    tracker.kc: 1.2
+    tracker.ka: 0.6
+    tracker.kz: 1.5
+    tracker.ki: 0.0
+    tracker.e0: 0.10
+    tracker.e_span: 0.30
+    tracker.e0_along: 0.10
+    tracker.e_span_along: 0.30
+    tracker.taudot_max: 1.0
+    tracker.taudot_acc: 1.0
+    tracker.k_yaw: 1.5
+    tracker.yaw_mode: path
+    mission.takeoff_vz: 1.0          # PX4's 3 s takeoff ramp (MPC_TKO_RAMP_T) dominates anyway
+    mission.settle_time: 0.3
+    mission.course_start_dz: 0.15    # start the course this close to hover height
+    mission.land_vz: 0.8
+    mission.land_vz_slow: 0.3
+    mission.land_slow_height: 0.25

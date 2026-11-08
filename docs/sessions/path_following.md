@@ -85,3 +85,50 @@ Keep a results table in `docs/results/path_following.md`.
 > on random maps, and record metrics in `docs/results/path_following.md`. Do not modify `~/skybeta` or the
 > flight interface. Work on branch `path-following` off `sim-and-plans`, commit small, and open a PR when a
 > milestone works in sim.
+
+## Drone-ready status (2026-11-07, 18:30 PST)
+
+Branch `path-following`, local only (not pushed). Quick guide: `path_following/GUIDE.md`; procedure: `docs/DRONE_RUN.md`.
+
+**Deploy: `drone-conservative-v1`** (git tag; `launch/conservative.launch.py`). Gate B route, plan slowed 1.4×,
+lag 0.66/0.18, pose jump guard, preset default `hover`. In the stack container:
+
+```bash
+ros2 launch team_path_following conservative.launch.py repo_root:=/root/team_ws/src/Dronehacks \
+  mission_preset:=hover|first_leg|course pose_topic:=/visual_slam/tracking/odometry pose_topic_frame:=odom \
+  base_height_on_pad_m:=<measured: OAK lens height above the floor - 0.0304>
+```
+
+Gazebo (cons03): done, 0 touches at 0.20 m, minimum clearance 0.30 m, VIO 2.4 cm RMS. That run was
+RTF-starved, so its time (55 s) isn't valid; the plan is about 27 s.
+
+**Faster candidate 3, not frozen** (`fast.launch.py.draft` / `tracker_fast.yaml.draft`). Settings:
+`course_v3_gateb2.yaml` (chicane vias on the centreline), sphere margin 0.35, MaxVelMag 1.2, time_scale 1.0,
+clearance re-timing 0.45/0.38/1.6. Sim command:
+
+```bash
+COURSE=planner/config/course_v3_gateb2.yaml CP_VIA=5,6,7 bash path_following/sim/slot0.sh fly vio <name> \
+  tracker_params:=/root/team/path_following/team_path_following/config/tracker_sim_c3.yaml \
+  "planner_overrides:=MaxVelMag=1.2@DilateRadius=0.35@DilateShape=sphere"
+```
+
+Offline (kinsim): 24.4 s, minimum clearance 0.316 m. Gazebo le1–le3 (slot 0) and c3rep1–3 (slot 2) were in
+flight at wind-down; results are in `path_following/runs/sim/le*` and `~/rep3_runs.log` on the VM.
+
+Earlier candidates and strict scores (`eval_bag.py`: touches at 0.29 m, whole drone through each opening):
+
+| Candidate | Runs | Result |
+|---|---|---|
+| 1 (vio20 settings) | lb1, lc1 | 19.3–19.7 s, 2–3 strict touches at maze corners and the chicane channel |
+| 2 (sphere 0.35) | ld1, c2rep1 | about 19.6 s, 1–2 strict touches, only in the chicane channel |
+
+**Still unproven:**
+- **The strict 0.29 m bar.** No profile has passed it 3× in a row yet. The chicane channel has only
+  0.40 m of centreline clearance, which leaves about 0.11 m for tracking plus VIO error.
+- **x500 sim vs Sky Beta.** The lag 0.66/0.18 comes from Gazebo's x500. Fit the real lag from the first
+  flight bags (`tools/fit_lag.py <bag> --states course`) before going faster. Under-estimating the lag
+  causes wall touches.
+- **Real VIO.** Gazebo showed one 9.5 m VIO jump at liftoff (vio21); the pose jump guard now aborts and
+  descends. It's untested on real cuVSLAM.
+- **Planning time on the Jetson** at 5 cm voxels with sphere dilation (laptop: about 3.5 s per candidate,
+  3 candidates, 45 s budget).
