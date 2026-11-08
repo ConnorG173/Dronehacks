@@ -20,7 +20,7 @@ source "$REPO/sim/scripts/common.sh"
 DDS=/root/team/sim/dds/fastdds_udp.xml
 IN_C="source /opt/ros/humble/setup.bash && source /root/skybeta_ws/install/setup.bash && cd /root/team"
 RUNS=path_following/runs/sim
-COURSE=planner/config/course_v3.yaml
+COURSE="${COURSE:-planner/config/course_v3_gateb.yaml}"   # COURSE=planner/config/course_v3.yaml: window route
 
 dexec() { docker exec -e ROS_DOMAIN_ID="$ROS_DOMAIN_ID" -e FASTRTPS_DEFAULT_PROFILES_FILE="$DDS" "$@"; }
 

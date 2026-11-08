@@ -39,7 +39,8 @@ FI_ARGUMENTS = [
 ROOT = _repo_root()
 OUR_ARGUMENTS = [
     ('repo_root', ROOT, 'repository root (planner binary, course config)'),
-    ('course_config', os.path.join(ROOT, 'planner', 'config', 'course_v3.yaml'), 'planner course config'),
+    ('course_config', os.path.join(ROOT, 'planner', 'config', 'course_v3_gateb.yaml'),
+     'planner course config (Gate B route; course_v3.yaml = the window route)'),
     ('planner_binary', os.path.join(ROOT, 'planner', 'build', 'gcopter_planner'), 'GCOPTER planner executable'),
     ('planner_overrides', 'MaxVelMag=1.2', 'config overrides, "Key=value@Key=value" (or ;)'),
     ('path_file', '', 'fly this DHPATH file instead of planning'),

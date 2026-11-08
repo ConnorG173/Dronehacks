@@ -11,8 +11,8 @@ mission_tracker:
     clearance_slow_m: 0.0        # 0 = off
     clearance_stop_m: 0.0
     tracker.ff_mode: inverse
-    tracker.tau_v: 0.55
-    tracker.t_delay: 0.10
+    tracker.tau_v: 0.66               # Gazebo fit (gt10); over-estimating is benign, under-estimating touched walls in kinsim
+    tracker.t_delay: 0.18
     tracker.kc: 1.2
     tracker.ka: 0.6
     tracker.kz: 1.5
