@@ -56,8 +56,8 @@ Watch it: Foxglove Studio → `ws://localhost:8765` (slot 1: 8766) through a tun
 | | |
 |---|---|
 | Name | `dronehacks-sim`, project `dronehacks-sim-jh` (account jhollister2025@gmail.com, Debit billing); zone in `sim/gcp/vm.env` |
-| Machine | g2-standard-16: 16 vCPU, 64 GB, 1× NVIDIA L4, 300 GB disk |
-| Cost | about $1.20/hour while running. **Stop it when nobody is using it.** |
+| Machine | g2-standard-32: 32 vCPU, 128 GB, 1× NVIDIA L4, 300 GB disk (16 vCPU could not run 3 slots at real time) |
+| Cost | about $1.80/hour while running. **Stop it when nobody is using it.** |
 
 ```bash
 gcloud compute instances start dronehacks-sim --project dronehacks-sim-jh --zone <zone>
