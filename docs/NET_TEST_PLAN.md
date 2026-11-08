@@ -35,8 +35,13 @@ Never arm outside the closed net. Props off on the bench. One drone in the net a
 - Our launch up: planner reports a valid plan; `/team/mission/state` = idle; `/skybeta/state` shows the
   envelope; no setpoints leave the tracker before go.
 - Localization: `/team/odom_map` on the pad ≈ the launch mark in `course` coordinates; `/team/loc/status` OK.
-- **Carry test**: pick the drone up and walk it 1 m forward, 1 m left, back. `/team/odom_map` must follow
-  (catches a frozen or mirrored VIO before it flies). Put it back on the launch mark, facing the start heading.
+- **Carry test** (needs its own localization launch): while disarmed PX4 reports *landed*, so the default
+  `team_loc` re-anchors to the launch pose whenever the drone is held still and the test would look perfect.
+  Launch `team_loc` with `ignore_land_detector:=true`, then pick the drone up and walk it 1 m forward, 1 m left,
+  back: `/team/odom_map` must follow (catches a frozen or mirrored VIO before it flies). Then put it back on the
+  launch mark facing the start heading and **relaunch `team_loc` with the defaults** before flying.
+- `base_height_on_pad_m`: measure with a tape, floor to the Pixhawk IMU with the drone on the pad. Both
+  workstreams take this launch arg.
 
 ## 2. Flights (in the net, safety pilot ready)
 
