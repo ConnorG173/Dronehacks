@@ -38,9 +38,18 @@ The other `~/team_ws/src` package now is `localizer` (localization's). It's need
 `allow_mode_request` false, `auto_offboard_on_arm` true, `odometry_topic` /visual_slam/tracking/odometry,
 altitude band 0.3–3.0), plus `mission_tracker`.
 
-**Before launching, make sure no other `flight_interface` is running** (`ros2 node list | grep
-flight_interface`). Two interfaces fight. On skybeta-12 the competitor window currently runs
-`team_ws/claude/startup/run_competitor.sh` (a dashboard launch); check that it doesn't start one.
+**Before launching, stop the competitor window's launch.** It runs team_build.sh, then
+`ros2 launch $COMPETITOR_PKG $COMPETITOR_LAUNCH` (default competitor_example: flight_interface plus the
+square example). Two flight interfaces fight. Do one of:
+- (a) by hand, tonight: `docker exec -it skybeta-stack tmux attach -t skybeta`, go to the competitor
+  window, Ctrl-C. Then run the command below in `~/skybeta/host/run.sh shell`.
+- (b) permanently: in `/etc/skybeta/drone.env` (sudo), set `COMPETITOR_PKG=team_path_following` and
+  `COMPETITOR_LAUNCH=mission.launch.py`, then restart the stack on the ground. That flies the launch
+  defaults, and **`mission_preset` defaults to `hover`**, so a restart can never fly the course by surprise.
+  The defaults also use `/team/odom_map` (variant B) and the repo's own paths.
+
+Check with `ros2 node list | grep flight_interface`: exactly one. `auto_offboard_on_arm` defaults to
+true in mission.launch.py, as in competitor.launch.py, and the command below passes it explicitly too.
 
 **Variant A, tonight's default: raw VIO + launch-pose fallback** (no localization package needed):
 
@@ -77,6 +86,8 @@ ros2 launch team_path_following mission.launch.py \
   --states course` gives the real airframe's lag.
 
 ## 3. Presets (`mission_preset:=`)
+
+Default `hover`. The full course needs an explicit `mission_preset:=course`.
 
 All three end with a landing and PX4's auto-disarm. Tested end to end through ROS
 (`tools/e2e_docker.sh loc`, kinsim stand-in for interface + PX4 + localization).

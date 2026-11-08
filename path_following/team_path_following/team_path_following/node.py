@@ -89,7 +89,7 @@ class MissionTracker(Node):
         d('planner_budget_s', 45.0)
         d('out_dir', '/tmp/team_path_following')
         d('time_scale', 1.0)               # >1 slows the loaded plan uniformly
-        d('mission_preset', 'course')     # course | hover (take off, hold, land on the pad) |
+        d('mission_preset', 'hover')      # hover (default: take off, hold, land on the pad) | course |
                                            # first_leg (to the first checkpoint slowly, hold, land there)
         d('hover_hold_s', 10.0)            # hover preset: hold time at HoverHeight over the pad
         d('first_leg_speed_mps', 0.4)      # first_leg preset: planner MaxVelMag

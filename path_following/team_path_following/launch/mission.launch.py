@@ -50,7 +50,8 @@ OUR_ARGUMENTS = [
     ('pose_topic_frame', 'course', 'frame of pose_topic: course | odom'),
     ('base_height_on_pad_m', '0.0', 'base_link height above the floor on the pad (fallback map; same name as team_loc)'),
     ('time_scale', '1.0', 'uniform slow-down (>1) of the loaded plan'),
-    ('mission_preset', 'course', 'course | hover (take off, hold, land) | first_leg (slowly to checkpoint 1, hold, land there)'),
+    ('mission_preset', 'hover', 'hover (default: take off, hold, land) | first_leg (slowly to checkpoint 1, hold, land there) | '
+     'course; default hover so a stack restart never flies the course by surprise'),
     ('hover_hold_s', '10.0', 'hover preset: hold time at HoverHeight'),
     ('first_leg_speed_mps', '0.4', 'first_leg preset: planner MaxVelMag'),
     ('first_leg_hold_s', '5.0', 'first_leg preset: hold at checkpoint 1 before landing'),

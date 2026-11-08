@@ -17,7 +17,7 @@ python3 /repo/path_following/tools/kinsim_ros.py $COURSE --exit-when-done $SIM_A
 SIM=$!
 # shellcheck disable=SC2086
 timeout 150 ros2 launch team_path_following mission.launch.py allow_mode_request:=true \
-  course_config:=$COURSE planner_binary:=/repo/planner/build-docker/gcopter_planner \
+  mission_preset:=course course_config:=$COURSE planner_binary:=/repo/planner/build-docker/gcopter_planner \
   out_dir:=/tmp/pf_out $LAUNCH_ARGS &
 TRK=$!
 set +e
