@@ -48,7 +48,7 @@ short tethered or low hover test, and only if CPU headroom has been measured wit
 - **Tracking loss.** With fusion, cuVSLAM bridges short visual dropouts on the IMU (up to ~1 s). Without it,
   it reports `vo_state 2`. The bridge's status gating keeps working unchanged.
 - **New failure mode.** A wrong IMU rotation, scale or time offset makes fusion worse than none. The sim
-  showed this: a misconfigured fused VIO diverged at takeoff (see `docs/results/imu_fusion.md`). So the gates
+  showed this: a misconfigured fused VIO diverged at takeoff (see `docs/results/imu_fusion.md` on branch imu-fusion). So the gates
   are mandatory:
   1. `calib_check.py` GOOD and within 3° of `calib.json`;
   2. bench drift pass;
@@ -60,3 +60,15 @@ short tethered or low hover test, and only if CPU headroom has been measured wit
 - Option A: re-select the organizers' launch (marker file / wrapper) and restart the camera/cuVSLAM launch on
   the ground.
 - Option B: revert the one line in `bridge.launch.py` and restart the bridge launch on the ground.
+
+## Update 2026-11-08: recommendation changed
+
+Don't feed cuVSLAM-fused VIO to PX4:
+- the stock 3.2.6 fusion is broken (IMU timestamp bug);
+- even patched, it diverges in some runs in Gazebo (one flown run reached ~100 km of error with PX4 on it);
+- on the drone it jumped ~4 m at start-up.
+
+Feed the **gyro heading correction** instead (`heading_fix.py node` → `/team_heading/odometry`). It sits between
+the leveller and the bridge, and option B above applies to it unchanged: bridge `input_topic:
+/team_heading/odometry`. Precondition: it beats `lev` on closure position and heading in hand-carry loops
+(`analyze.py --hfix`), with ≥ 10 s still before each.
