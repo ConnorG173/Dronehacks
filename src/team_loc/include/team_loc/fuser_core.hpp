@@ -35,6 +35,12 @@ class AnchorTracker {
 
   void on_landed(double t, bool landed) { t_landed_ = t; landed_ = landed; }
   void on_armed(double t, bool armed);
+  // A VIO discontinuity (teleport): keep the course pose continuous across it by folding the step
+  // into the anchor, T_course_odom <- T_course_odom * T_pre * T_post^-1.
+  void absorb(const Iso3& T_odom_base_pre, const Iso3& T_odom_base_post) {
+    T_course_odom_ = T_course_odom_ * T_odom_base_pre * T_odom_base_post.inverse();
+    p_ref_ = T_odom_base_post.translation();
+  }
   void on_attitude(double t, const Mat3& R_enu_flu) { t_att_ = t; R_att_ = R_enu_flu; }
 
   // Call on every VIO message. `speed` = smoothed VIO speed (m/s). Returns true if the anchor
@@ -168,6 +174,7 @@ struct StatusInputs {
   int consecutive_rejected = 0;
   bool vio_frozen = false;
   bool vio_static = false;
+  bool jump_absorbed = false;      // a VIO jump was folded into the anchor recently
   double z_disagree_m = -1;        // VIO vs rangefinder height change; -1 = unknown
   double max_z_disagree_m = 0.35;
 };

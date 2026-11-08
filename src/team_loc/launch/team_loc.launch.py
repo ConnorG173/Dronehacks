@@ -38,6 +38,7 @@ def generate_launch_description():
         DeclareLaunchArgument('left_info_topic', default_value='/oak/left/camera_info'),
         DeclareLaunchArgument('right_info_topic', default_value='/oak/right/camera_info'),
         DeclareLaunchArgument('use_sim_time', default_value='false'),
+        DeclareLaunchArgument('matcher_debug_dump_dir', default_value=''),
     ]
     fuser = Node(
         package='team_loc', executable='loc_fuser', name='loc_fuser', output='screen', emulate_tty=True,
@@ -65,6 +66,7 @@ def generate_launch_description():
             'left_info_topic': L('left_info_topic'),
             'right_info_topic': L('right_info_topic'),
             'use_sim_time': L('use_sim_time'),
+            'debug_dump_dir': L('matcher_debug_dump_dir'),
         }],
     )
     return LaunchDescription(args + [fuser, matcher])

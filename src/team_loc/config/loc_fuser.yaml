@@ -18,8 +18,9 @@ loc_fuser:
     jump_speed_mps: 4.0
     jump_yaw_deg: 20.0
     jump_yaw_rate_deg_per_s: 170.0   # a longer gap may turn more before it counts as a jump
-    jump_sigma_xy_m: 0.5             # after a jump: widen the correction, re-acquire from fixes
-    jump_sigma_yaw_deg: 15.0
+    jump_sigma_xy_m: 0.15            # after a jump (absorbed into the anchor): widen the correction
+    jump_sigma_yaw_deg: 5.0
+    jump_warn_s: 3.0                 # WARN this long after an absorbed jump
     jump_recover_fixes: 3
     # VIO sanity (vision cannot fake these)
     frozen_identical_s: 1.0          # bit-identical VIO poses this long in flight -> ERROR

@@ -124,6 +124,7 @@ class WallMatcher(Node):
         P("xy_window_m", 0.4)
         P("yaw_window_deg", 8.0)
         P("max_image_age_s", 0.5)          # skip a pair older than this (we fell behind)
+        P("debug_dump_dir", "")            # if set: save every 10th stacked scan (debug only; never read back)
         g = lambda n: self.get_parameter(n).value
         self.g = g
 
@@ -188,7 +189,14 @@ class WallMatcher(Node):
 
     def odom_cb(self, m):
         p = m.pose.pose.position
-        self.odom.add(stamp_s(m.header), p.x, p.y, p.z, yaw_of_q(m.pose.pose.orientation))
+        t = stamp_s(m.header)
+        if self.odom.d:
+            t0, x0, y0, z0, _ = self.odom.d[-1]
+            dt = t - t0
+            if dt > 0 and math.dist((p.x, p.y, p.z), (x0, y0, z0)) > max(0.3, 4.0 * dt):
+                self.stack.reset()   # a VIO teleport: earlier frames no longer line up
+                self.odom.d.clear()
+        self.odom.add(t, p.x, p.y, p.z, yaw_of_q(m.pose.pose.orientation))
 
     def lpos_cb(self, m):
         if m.dist_bottom_valid and math.isfinite(m.dist_bottom):
@@ -238,6 +246,18 @@ class WallMatcher(Node):
         if q is None:
             return None
         return bev.level_rotation(bev.quat_to_mat(q.x, q.y, q.z, q.w))
+
+    def score_at(self, W, pose):
+        if len(W) == 0:
+            return 0.0
+        x, y, th = pose
+        c, s_ = math.cos(th), math.sin(th)
+        p = np.asarray(W) @ np.array([[c, s_], [-s_, c]]) + (x, y)
+        ij = np.floor((p - self.cmap.origin) / self.cmap.res).astype(np.int64)
+        ok = (ij >= 0).all(1) & (ij < self.cmap.lik.shape[0]).all(1)
+        ij = ij[ok]
+        cage = self.cmap.cage[ij[:, 0], ij[:, 1]]
+        return float(self.cmap.lik[ij[cage, 0], ij[cage, 1]].mean()) if cage.any() else 0.0
 
     # ------------------------------------------------------------------ work
     def publish_status(self, st):
@@ -293,6 +313,10 @@ class WallMatcher(Node):
             st["reason"] = "no prior (/team/odom_map) at the image stamp"
             return self.publish_status(st)
         prior = (pr[0], pr[1], pr[3])
+        st["stamp"] = round(t, 4)
+        # Score of the scan at the prior itself (no search): with a good prior, low here means the scan
+        # does not fit the map (calibration / extrinsics / map alignment), not a search problem.
+        st["score_at_prior"] = round(self.score_at(W, prior), 3)
         res = match(self.cmap, W, F, prior, self.mp)
         ok, why = gate(res, self.mp)
         st.update(ok=ok, reason=why, score=round(res.score, 3), n_in_cage=res.n_wall,
@@ -315,6 +339,12 @@ class WallMatcher(Node):
             m.pose.covariance = [float(v) for v in C.ravel()]
             self.fix_pub.publish(m)
         st.update(n_fix=self.n_fix, n_try=self.n_try)
+        d = self.g("debug_dump_dir")
+        if d and self.n_try % 10 == 0:
+            import os
+            os.makedirs(d, exist_ok=True)
+            np.savez(os.path.join(d, f"scan_{self.n_try:05d}.npz"), W=W, F=F, prior=np.array(prior),
+                     pose=res.pose, stamp=t, depth=depth[::2, ::2])
         self.publish_status(st)
 
 

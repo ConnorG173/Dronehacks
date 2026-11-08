@@ -82,8 +82,9 @@ class LocFuser : public rclcpp::Node {
     vp.jump_speed_mps = declare_parameter<double>("jump_speed_mps", vp.jump_speed_mps);
     vp.jump_yaw_rad = declare_parameter<double>("jump_yaw_deg", 20.0) * M_PI / 180.0;
     vp.jump_yaw_rate_radps = declare_parameter<double>("jump_yaw_rate_deg_per_s", 170.0) * M_PI / 180.0;
-    jump_sigma_xy_m_ = declare_parameter<double>("jump_sigma_xy_m", 0.5);
-    jump_sigma_yaw_rad_ = declare_parameter<double>("jump_sigma_yaw_deg", 15.0) * M_PI / 180.0;
+    jump_sigma_xy_m_ = declare_parameter<double>("jump_sigma_xy_m", 0.15);
+    jump_sigma_yaw_rad_ = declare_parameter<double>("jump_sigma_yaw_deg", 5.0) * M_PI / 180.0;
+    jump_warn_s_ = declare_parameter<double>("jump_warn_s", 3.0);
     jump_recover_fixes_ = declare_parameter<int>("jump_recover_fixes", 3);
     vio_ = VioMonitor(vp);
 
@@ -197,12 +198,22 @@ class LocFuser : public rclcpp::Node {
     const Iso3 T_odom_base = to_iso(m.pose.pose);
 
     if (vio_.on_odom(t, stamp_s(m.header.stamp), T_odom_base)) {
-      // A VIO reset/teleport: the correction must absorb it. Widen it and let fixes pull it back;
-      // ERROR stays until enough fixes agree (or the next arming).
-      filter_->inflate(jump_sigma_xy_m_, jump_sigma_yaw_rad_);
-      fixes_since_jump_ = 0;
-      RCLCPP_ERROR(get_logger(), "VIO jump detected: status ERROR until %d fixes re-acquire%s",
-                   jump_recover_fixes_, correction_enabled_ ? "" : " (correction off: until the next arming)");
+      if (anchor_.anchored() && have_prev_) {
+        // A VIO teleport (seen in sim: 0.31 m in one 32 ms frame). The body cannot move like that,
+        // so fold the step into the anchor: the course pose stays continuous, and because PX4 sees
+        // the same jump in odom, course->odom setpoints stay physically right. Fixes then clean up.
+        anchor_.absorb(prev_odom_, T_odom_base);
+        odom_buf_.clear();             // fixes stamped before the jump no longer line up
+        filter_->inflate(jump_sigma_xy_m_, jump_sigma_yaw_rad_);
+        vio_.clear_jump();
+        jump_warn_until_ = t + jump_warn_s_;
+        ++n_jumps_;
+        RCLCPP_WARN(get_logger(), "VIO jump of %.2f m absorbed into the anchor (WARN for %.1f s)",
+                    (T_odom_base.translation() - prev_odom_.translation()).norm(), jump_warn_s_);
+      } else {
+        fixes_since_jump_ = 0;
+        RCLCPP_ERROR(get_logger(), "VIO jump before anchoring: status ERROR until the next arming");
+      }
     }
     const bool was_anchored = anchor_.anchored();
     if (anchor_.on_odom(t, T_odom_base, vio_.speed(), vo_ok())) {
@@ -378,6 +389,7 @@ class LocFuser : public rclcpp::Node {
     in.moving = vio_.speed() > 0.1 && anchor_.state() == AnchorTracker::State::Frozen;
     in.fix_age_s = t_last_fix_ < 0 ? -1.0 : t - t_last_fix_;
     in.slew_residual_m = slew_residual_m_;
+    in.jump_absorbed = t < jump_warn_until_;
     const bool airborne = anchor_.state() == AnchorTracker::State::Frozen;
     in.vio_frozen = sanity_->frozen(t, airborne);
     in.vio_static = sanity_->static_pose(t, airborne);
@@ -406,6 +418,7 @@ class LocFuser : public rclcpp::Node {
     kv("vio_rate_hz", fmt(in.vio_rate_hz, 1));
     kv("vio_age_s", fmt(std::min(in.vio_age_s, 999.0)));
     kv("vio_jump", in.jump_latched ? "true" : "false");
+    kv("vio_jumps_absorbed", std::to_string(n_jumps_));
     kv("vio_frozen", in.vio_frozen ? "true" : (in.vio_static ? "static" : "false"));
     kv("z_vio_vs_range_m", in.z_disagree_m < 0 ? "unknown" : fmt(in.z_disagree_m));
     kv("dist_since_anchor_m", fmt(vio_.path_length() - path_at_anchor_, 2));
@@ -448,7 +461,8 @@ class LocFuser : public rclcpp::Node {
   double slew_residual_m_ = 0;
   bool have_prev_ = false;
   double jump_sigma_xy_m_ = 0.5, jump_sigma_yaw_rad_ = 0.26;
-  int jump_recover_fixes_ = 3, fixes_since_jump_ = 0;
+  int jump_recover_fixes_ = 3, fixes_since_jump_ = 0, n_jumps_ = 0;
+  double jump_warn_s_ = 3.0, jump_warn_until_ = -1;
   long n_fix_in_ = 0, n_fix_stale_ = 0;
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr sub_fix_;
   bool correction_enabled_ = false, publish_tf_ = true, armed_ = false, map_odom_tf_ok_ = false;

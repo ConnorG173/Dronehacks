@@ -22,7 +22,7 @@ def _dedupe(q, res):
 
 def render(world, origin, res, pose, fov_deg=72.0, n_rays=120, rmin=0.3, rmax=5.0, noise=0.01,
            rng=None, room=0.0, cage_half=3.049, edge_only=False, edge_jump=0.15, keep_frac=0.03,
-           free_stop=0.10):
+           free_stop=0.10, noise_k=0.0):
     """One frame from pose (x, y, yaw) -> (wall_pts, free_pts) in the body frame (deduped)."""
     rng = rng or np.random.default_rng(0)
     x, y, yaw = pose
@@ -47,7 +47,9 @@ def render(world, origin, res, pose, fov_deg=72.0, n_rays=120, rmin=0.3, rmax=5.
         for k in np.nonzero(~has & out.any(1))[0]:
             if rng.random() < room:
                 r[k] = s[np.argmax(out[k])] + rng.uniform(0.2, 2.0)
-    r = r + rng.normal(0, noise, n_rays) * np.isfinite(r)
+    # stereo-like range noise: noise + noise_k * r^2 (depth error grows with the square of range)
+    sig = noise + noise_k * np.nan_to_num(r) ** 2
+    r = r + rng.normal(0, 1, n_rays) * sig * np.isfinite(r)
     ok = np.isfinite(r) & (r > rmin) & (r < rmax)
     if edge_only:
         rr = np.where(ok, r, np.inf)

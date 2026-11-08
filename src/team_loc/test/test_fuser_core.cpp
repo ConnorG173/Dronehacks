@@ -222,3 +222,20 @@ TEST(Anchor, NotLandedOnThePadKeepsRefreshingUntilRealMotion) {
   EXPECT_EQ(a.state(), AnchorTracker::State::Frozen);
   EXPECT_TRUE(course_pos(a, at(5.02, 5)).isApprox(Vec3(-2.5, 0.9, 0.1), 1e-9));
 }
+
+TEST(Anchor, AbsorbKeepsCoursePoseContinuousAcrossAVioJump) {
+  AnchorTracker a(params());
+  a.on_landed(0, true);
+  ASSERT_TRUE(a.on_odom(0, at(1, 1, 0.2), 0.0, true));
+  a.on_landed(0.1, false);
+  a.on_odom(0.2, at(1.5, 1, 0.2), 0.5, true);
+  ASSERT_EQ(a.state(), AnchorTracker::State::Frozen);
+  const Iso3 pre = at(2.0, 1.0, 0.2);
+  const Vec3 before = course_pos(a, pre);
+  const Iso3 post = at(2.31, 0.8, 0.35);       // cuVSLAM teleports 0.37 m and 8.6 deg
+  a.absorb(pre, post);
+  EXPECT_TRUE(course_pos(a, post).isApprox(before, 1e-9));
+  // Motion after the jump continues from there: 1 m forward in the post-jump body frame.
+  Iso3 fwd = post * make_iso(Mat3::Identity(), Vec3(1, 0, 0));
+  EXPECT_NEAR((course_pos(a, fwd) - before).norm(), 1.0, 1e-9);
+}

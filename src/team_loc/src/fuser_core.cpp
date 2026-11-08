@@ -175,6 +175,7 @@ StatusResult evaluate_status(const StatusInputs& in, const StatusParams& p) {
   if (in.vio_ever && in.vio_age_s <= p.vio_timeout_s && in.vio_rate_hz < p.min_rate_hz)
     warn.push_back("VIO rate low");
   if (in.vo_state == 3) warn.push_back("VIO heuristic (vo_state 3)");
+  if (in.jump_absorbed) warn.push_back("VIO jump absorbed");
   if (in.vio_static && !in.vio_frozen) warn.push_back("VIO pose static in flight");
   if (in.z_disagree_m > in.max_z_disagree_m) warn.push_back("VIO height disagrees with rangefinder");
   if (in.vo_state == 0) warn.push_back("VIO state unknown (vo_state 0)");
