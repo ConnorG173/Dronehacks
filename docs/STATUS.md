@@ -17,19 +17,29 @@ Candidate 3 (path-following 5d62099) targets that one spot.
 - Plan: 24.4 s. Kinematic sim: min clearance 0.316 m.
 - Runs: le1–le3 in slot 0 and c3rep1–3 in slot 2 (`~/rep3_runs.log`). Their verdicts were pending when the sim was paused.
 
-## What to fly on the drone
-- **Deploy profile: `drone-conservative-v1`** (`conservative.launch.py`, Gate B, plan slowed 1.4x, peak ~0.86 m/s).
-  Never validated in sim: its only run was during the CPU-overload era.
-- **Fast profile:** `fast.launch.py.draft` carries candidate 3's settings. Freeze it as `drone-fast-v1` only after 3 strict-clean runs in a row.
-- **Localization:** raw cuVSLAM in, with our jump absorption on. M1 recommended: correction off, jump absorption and sanity checks on. Correction helps when VIO drifts (gt08: 5.8 vs 8.4 cm) but hurts when VIO is good (loc02: 5.9 vs 2.7 cm). It absorbed a 21 m cuVSLAM blow-up in loc01. See docs/sessions/localization.md.
-- **Procedure:** docs/NET_TEST_PLAN.md (bench, carry, hover, first_leg, course). Deploy with `deploy/deploy_to_drone.sh` (skybeta-12 only).
-- Measure `base_height_on_pad_m` on the real drone first.
+## What to fly on the drone (ready)
+Justin accepted 0.25 m clearance as the bar (the strict 0.29 m was over-conservative), so the fast profile is frozen.
+
+| Order | Profile | Git tag (path-following) | Course |
+|---|---|---|---|
+| 1 | `conservative.launch.py` | `drone-conservative-v1` | plan ~27 s, peak ~0.86 m/s |
+| 2 | `fast.launch.py` = candidate 3 (gateb2 chicane vias, sphere 0.35, near-wall slow-down, drone lag gains 0.66/0.18) | `drone-fast-v1` (8cceade) | ~24–25 s |
+
+Localization: raw cuVSLAM, team_loc M1 (correction off; jump absorption and sanity checks on). See docs/sessions/localization.md and docs/DRONE_RUN.md on the localization branch.
+
+**Deploy steps** (drone on USB-C as `skybeta-usb`; the script refuses any host but skybeta-12):
+1. Stop the competitor window's own launch on the drone, then deploy from the sim-and-plans checkout:
+   `bash deploy/deploy_to_drone.sh skybeta-usb -- ../Dronehacks-path-following/path_following/team_path_following ../Dronehacks-path-following/planner ../Dronehacks-localization/src/team_loc ../Dronehacks-localization/src/team_loc_matcher`
+   The launch files expect `repo_root:=/root/team_ws/src/Dronehacks` (planner + course configs). Follow docs/DRONE_RUN.md (path-following branch) for the exact tree and planner build.
+2. Measure `base_height_on_pad_m` (OAK lens height above the floor - 0.0304).
+3. Work through docs/NET_TEST_PLAN.md in order: bench, carry (team_loc `ignore_land_detector:=true`), hover, first_leg, course with conservative. Only then fast.
+4. After the first flights, fit the real lag (`tools/fit_lag.py <bag> --states course`) before trusting the fast profile. The 0.66/0.18 lag comes from Gazebo's x500, not the Sky Beta.
 
 ## Where things are
 - Branches (local, **not pushed**): `sim-and-plans` (sim, infra, docs), `path-following` (364442d), `localization` (5304c06; its build and checks are in docs/DRONE_RUN.md on that branch).
 - Session guides: docs/sessions/path_following.md and docs/sessions/localization.md (each has a "Drone-ready status" section).
 - Coordinator run scripts: `sim/coordinator/` (repeat runs, IMU A/B, team-path runs, VIO-vs-GT checks).
-- Recordings on the VM: `~/recordings/sim<slot>_<UTC>/*.mcap`. Only runs recorded after fdf3b33 show the 3D view correctly in Foxglove (layout: docs/foxglove_sim_layout.json).
+- Recordings: downloaded, finalized and restamped to sim time, in `recordings/` (gitignored), each labelled by run. Open with Foxglove plus `recordings/foxglove_sim_layout.json`. `sim/tools/fix_mcap.py` repairs a recording the recorder didn't close. Originals on the VM: `~/recordings/sim<slot>_<UTC>/*.mcap`. Only runs recorded after fdf3b33 show the 3D view correctly in Foxglove (layout: docs/foxglove_sim_layout.json).
 
 ## Not started or paused
 - IMU-fusion A/B (`VIO_IMU=1`, `sim/coordinator/ab_imu.sh`).
