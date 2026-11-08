@@ -28,6 +28,7 @@ import argparse
 import json
 import math
 import os
+import time
 
 import numpy as np
 
@@ -86,7 +87,12 @@ class HeadingFix:
         self.p_out = self.p_prev = self.R_prev = None
         self.still_for, self.jumps, self.still_anchor = 0.0, 0, None
 
-    def step(self, R_vio, p_vio, rotvec, dt):
+    def recalibrate(self):
+        """Start a fresh gyro-bias calibration (dashboard: reset home / course start). Keeps the last bias in
+        use until the new window has bias_min_s of data; 'calibrated' needs the full window again."""
+        self.bias_r, self.bias_T, self.still_for, self.still_anchor = np.zeros(3), 0.0, 0.0, None
+
+    def step(self, R_vio, p_vio, rotvec, dt, learn_bias=True):
         """R_vio, p_vio: levelled VIO now. rotvec: body rotation (FLU, rad) since the previous step, dt its
         duration (gyro stamps). Returns (R_out, p_out)."""
         R_vio, p_vio = np.asarray(R_vio, float), np.asarray(p_vio, float)
@@ -107,7 +113,7 @@ class HeadingFix:
                     self.still_for += dt
             else:
                 self.still_anchor, self.still_for = None, 0.0
-            if self.still_for >= self.still_s:
+            if learn_bias and self.still_for >= self.still_s:
                 # time-weighted mean of the still gyro over ALL still time, forgetting with bias_tc of still time
                 # (tracks warm-up drift). Not a per-sample blend: one 16 ms sample is far too noisy to seed it.
                 f = math.exp(-dt / self.bias_tc)
@@ -172,14 +178,18 @@ def node(a):
     from nav_msgs.msg import Odometry
     from rclpy.node import Node
     from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
-    from px4_msgs.msg import SensorCombined
+    from px4_msgs.msg import SensorCombined, VehicleLandDetected
+    from std_msgs.msg import String
     rclpy.init()
     n = Node('team_heading_fix')
     pub = n.create_publisher(Odometry, '/team_heading/odometry', 10)
+    pub_st = n.create_publisher(String, '/team_heading/status', 10)
+    seen = {'gyro': None, 'vio': None, 'landed': None, 'landed_t': None, 'calib_req': None, 'calib_why': ''}
     hf = HeadingFix(tau_s=a.tau)
     g = {'R': np.eye(3), 'dt': 0.0, 't': None}
 
     def on_gyro(m):
+        seen['gyro'] = time.monotonic()
         t = int(m.timestamp) * 1e-6
         w = np.array([float(m.gyro_rad[0]), -float(m.gyro_rad[1]), -float(m.gyro_rad[2])])   # FRD -> FLU
         if g['t'] is not None and 0.0 < t - g['t'] < 0.1:
@@ -188,14 +198,21 @@ def node(a):
         g['t'] = t
 
     def on_vio(m):
+        seen['vio'] = time.monotonic()
         q, p = m.pose.pose.orientation, m.pose.pose.position
         rv = None
+        gyro_stale = seen['gyro'] is None or time.monotonic() - seen['gyro'] > 0.3
         if g['dt'] > 0:
             c = float(np.clip((np.trace(g['R']) - 1) / 2, -1, 1))
             th = math.acos(c)
             rv = np.zeros(3) if th < 1e-9 else th / (2 * math.sin(th)) * np.array(
                 [g['R'][2, 1] - g['R'][1, 2], g['R'][0, 2] - g['R'][2, 0], g['R'][1, 0] - g['R'][0, 1]])
-        R, po = hf.step(qm(q.x, q.y, q.z, q.w), [p.x, p.y, p.z], rv, g['dt'])
+        Rv = qm(q.x, q.y, q.z, q.w)
+        landed = seen['landed'] is True and seen['landed_t'] is not None and time.monotonic() - seen['landed_t'] < 2.0
+        R, po = hf.step(Rv, [p.x, p.y, p.z], None if gyro_stale else rv, 0.0 if gyro_stale else g['dt'],
+                        learn_bias=landed)     # bias is learned ONLY on the ground (never in a still hover)
+        if gyro_stale:
+            hf.R_prev = Rv          # hold the correction; re-sync the heading baseline (no span mismatch later)
         g['R'], g['dt'] = np.eye(3), 0.0
         o = Odometry()
         o.header = m.header
@@ -212,6 +229,31 @@ def node(a):
                      history=HistoryPolicy.KEEP_LAST, depth=100)
     n.create_subscription(SensorCombined, a.gyro_topic, on_gyro, qos)
     n.create_subscription(Odometry, '/claude/vio_leveled/odometry', on_vio, 10)
+    def on_land(m):
+        seen['landed'], seen['landed_t'] = bool(m.landed), time.monotonic()
+
+    def on_calibrate(m):
+        landed = seen['landed'] is True and seen['landed_t'] is not None and time.monotonic() - seen['landed_t'] < 2.0
+        if not landed:
+            n.get_logger().warn(f'calibration request ignored: not landed ({m.data})')
+            return
+        hf.recalibrate()
+        seen['calib_req'], seen['calib_why'] = time.monotonic(), m.data
+        n.get_logger().info(f'gyro calibration restarted: {m.data}')
+
+    def status():
+        now = time.monotonic()
+        d = {'calibrated': hf.bias_T >= a.calib_s, 'still_s': round(hf.bias_T, 1), 'calib_s': a.calib_s,
+             'still_now_s': round(hf.still_for, 1), 'correction_deg': round(math.degrees(hf.delta), 2),
+             'bias_dps': [round(float(x), 4) for x in np.degrees(hf.bias)], 'jumps': hf.jumps,
+             'gyro_age_s': None if seen['gyro'] is None else round(now - seen['gyro'], 2),
+             'vio_age_s': None if seen['vio'] is None else round(now - seen['vio'], 2),
+             'landed': seen['landed'], 'calib_request_age_s': None if seen['calib_req'] is None else
+             round(now - seen['calib_req'], 1), 'calib_request': seen['calib_why']}
+        pub_st.publish(String(data=json.dumps(d)))
+    n.create_subscription(VehicleLandDetected, '/claude/usb/out/vehicle_land_detected', on_land, qos)
+    n.create_subscription(String, '/team_heading/calibrate', on_calibrate, 10)
+    n.create_timer(0.5, status)
     n.create_timer(5.0, lambda: n.get_logger().info(
         f'heading correction {math.degrees(hf.delta):+.2f} deg, bias {np.round(np.degrees(hf.bias), 3).tolist()} '
         f'deg/s from {hf.bias_T:.0f} s still, jumps absorbed {hf.jumps}'))
@@ -228,6 +270,7 @@ def main():
     nd = sp.add_parser('node')
     nd.add_argument('--gyro-topic', default='/fmu/out/sensor_combined')
     nd.add_argument('--tau', type=float, default=3600.0)
+    nd.add_argument('--calib-s', type=float, default=10.0, help='still gyro seconds needed before "calibrated"')
     a = ap.parse_args()
     offline(a) if a.cmd == 'offline' else node(a)
 
