@@ -252,3 +252,13 @@ TEST(Anchor, AirborneOnlyBetweenTakeoffAndLanding) {
   EXPECT_FALSE(a.airborne(5.0));
   EXPECT_EQ(a.state(), AnchorTracker::State::Frozen);
 }
+
+TEST(Vio, VelocityIsTheLastGoodMotion) {
+  VioMonitor v(VioParams{});
+  double t = 0;
+  for (int i = 0; i < 30; ++i, t += 1.0 / 30) v.on_odom(t, t, at(1.0 * t, 0.5 * t));
+  EXPECT_NEAR(v.velocity().x(), 1.0, 0.05);
+  EXPECT_NEAR(v.velocity().y(), 0.5, 0.05);
+  EXPECT_TRUE(v.on_odom(t, t, at(5, 5)));          // a jump does not change the velocity
+  EXPECT_NEAR(v.velocity().x(), 1.0, 0.05);
+}

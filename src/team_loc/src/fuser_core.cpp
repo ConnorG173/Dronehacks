@@ -100,6 +100,7 @@ bool VioMonitor::on_odom(double t_recv, double t_stamp, const Iso3& T) {
       } else {
         path_len_ += dist;
         speed_ = p_.speed_alpha * (dist / dt) + (1.0 - p_.speed_alpha) * speed_;
+        vel_ = p_.speed_alpha * (dp / dt) + (1.0 - p_.speed_alpha) * vel_;
       }
     }
   }

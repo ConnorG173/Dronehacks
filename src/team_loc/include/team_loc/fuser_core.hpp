@@ -94,6 +94,8 @@ class VioMonitor {
   double age(double now) const { return n_ ? now - t_recv_last_ : 1e9; }
   double rate_hz(double now) const;
   double speed() const { return speed_; }
+  // Last good (non-jump) velocity in odom, m/s (EMA): the motion to keep across a jump.
+  const Vec3& velocity() const { return vel_; }
   double path_length() const { return path_len_; }
   bool jump_latched() const { return jump_latched_; }
   void clear_jump() { jump_latched_ = false; }
@@ -106,6 +108,7 @@ class VioMonitor {
   Iso3 T_last_ = Iso3::Identity();
   std::deque<double> recv_times_;
   double speed_ = 0, path_len_ = 0;
+  Vec3 vel_ = Vec3::Zero();
   bool jump_latched_ = false;
 };
 

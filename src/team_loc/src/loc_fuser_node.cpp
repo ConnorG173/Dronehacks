@@ -205,7 +205,12 @@ class LocFuser : public rclcpp::Node {
         // A VIO teleport (seen in sim: 0.31 m in one 32 ms frame). The body cannot move like that,
         // so fold the step into the anchor: the course pose stays continuous, and because PX4 sees
         // the same jump in odom, course->odom setpoints stay physically right. Fixes then clean up.
-        anchor_.absorb(prev_odom_, T_odom_base);
+        // Keep the motion the body really made during the jumped frame (last good velocity * dt),
+        // or a burst of jumped frames throws that motion away (loc01: 8 frames, ~0.3 s).
+        const double dtj = std::clamp(stamp_s(m.header.stamp) - prev_stamp_, 0.0, 0.2);
+        Iso3 pre_moved = prev_odom_;
+        pre_moved.translation() += vio_.velocity() * dtj;
+        anchor_.absorb(pre_moved, T_odom_base);
         odom_buf_.clear();             // fixes stamped before the jump no longer line up
         filter_->inflate(jump_sigma_xy_m_, jump_sigma_yaw_rad_);
         vio_.clear_jump();

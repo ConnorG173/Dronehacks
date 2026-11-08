@@ -198,21 +198,32 @@ def summarize(name, est: Track, gt: Track, cps, goal, vio: Track | None):
 
 
 class Clearance:
-    """Horizontal distance from a course point to the nearest wall or net (course wall grid, 5 cm)."""
+    """Horizontal distance from a course point to the nearest map surface point within +-slab_m of its
+    height (DHMAP points, floor excluded). 3D-aware: the window and tube openings are open."""
 
-    def __init__(self, config):
+    def __init__(self, config, slab_m=0.15, cell=0.05):
         here = os.path.dirname(os.path.abspath(__file__))
         sys.path.insert(0, os.path.join(here, "..", "src", "team_loc_matcher"))
         from team_loc_matcher import wallgrid
-        g = wallgrid.build_from_files(None, config)
-        surf = g["wall"] | g["boundary"]
-        self.dist = wallgrid._dist_to(surf, g["res_m"])
-        self.res, self.o = g["res_m"], np.array([g["origin_x"], g["origin_y"]])
+        P = wallgrid.read_dhmap(wallgrid.map_file_of(config))
+        floor = float(np.percentile(P[:, 2], 1))
+        P = P[P[:, 2] > floor + 0.05]
+        # thin to one point per 2.5 cm voxel: same answer, far fewer points
+        k = np.unique(np.floor(P / 0.025).astype(np.int64), axis=0)
+        self.P = (k + 0.5) * 0.025
+        o = np.argsort(self.P[:, 2])
+        self.P, self.z = self.P[o], self.P[o, 2]
+        self.slab = slab_m
 
-    def __call__(self, xy):
-        ij = np.floor((np.asarray(xy, float)[:, :2] - self.o) / self.res).astype(np.int64)
-        ij = np.clip(ij, 0, np.array(self.dist.shape) - 1)
-        return self.dist[ij[:, 0], ij[:, 1]]
+    def __call__(self, xyz):
+        q = np.asarray(xyz, float)
+        out = np.full(len(q), np.inf)
+        for i, (x, y, z) in enumerate(q):
+            a, b = np.searchsorted(self.z, [z - self.slab, z + self.slab])
+            if b > a:
+                d = self.P[a:b, :2] - (x, y)
+                out[i] = math.sqrt(float((d * d).sum(1).min()))
+        return out
 
 
 def clearance_report(name, est: Track, gt: Track, clr: Clearance, tight_m=0.6):
@@ -225,9 +236,12 @@ def clearance_report(name, est: Track, gt: Track, clr: Clearance, tight_m=0.6):
     if not ok.any():
         return {}
     p, e = p[ok], est.p[ok]
+    step = max(1, len(p) // 1500)          # ~1500 samples is plenty at 30 Hz
+    p, e = p[::step], e[::step]
     c_gt = clr(p)
     err = np.hypot(e[:, 0] - p[:, 0], e[:, 1] - p[:, 1])
-    mirrored = p[:, :2] - (e[:, :2] - p[:, :2])
+    mirrored = p.copy()
+    mirrored[:, :2] = p[:, :2] - (e[:, :2] - p[:, :2])
     c_pred = clr(mirrored)
     tight = c_gt < tight_m
     out = {"name": name, "gt_min": float(c_gt.min()), "pred_min": float(c_pred.min()),
