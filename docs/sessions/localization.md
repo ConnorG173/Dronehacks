@@ -97,13 +97,13 @@ Gazebo slot 1 numbers, ATE = horizontal RMS vs ground truth:
 | gt08 | ground truth | on (passive) | 0.058 / 0.084 m | 0.04 0.04 0.03 0.11 0.10 / 0.05 0.05 0.06 0.13 0.10 | after the net-model fix; RTF ≈ 0.3 |
 | loc01 | /team/odom_map | on | 0.059 / 10.9 m | 0.04 0.03 0.03 0.08 0.21 / 0.02 0.02 0.02 0.00 21.4 | cuVSLAM blew up near the goal (about 3 m per frame for 0.3 s); our pose stayed continuous and ended 3 cm off. Absorption now keeps the dropped motion |
 | loc02 | /team/odom_map | on | 0.059 / **0.027** m | 0.03 0.01 0.05 0.08 0.02 0.04 0.05 / 0.03 0.04 0.01 0.02 0.05 0.01 0.03 | candidate 2 (Gate B, sphere 0.35, time_scale 1.0); RTF 0.34 in flight, 1.0 at end. cuVSLAM was very good, and the correction added error. True min clearance 0.278 m |
-| gt10 | ground truth | on (passive) | not finished at wind-down | | |
+| gt10 | ground truth | on (passive) | 0.051 / **0.025** m | 0.03 0.03 0.06 0.05 0.06 0.07 0.02 / 0.03 0.03 0.04 0.02 0.01 0.04 0.04 | candidate 2. cuVSLAM good again, and the correction doubled the error. If flown on it: min clearance 0.186 m vs 0.239 m on raw VIO (true path 0.247 m) |
 
 In every slot-1 run with the correction on, status was never OK while error was above 0.3 m, and
 ERROR never fired in flight.
 
 **Why the correction stays off:** it helps when cuVSLAM drifts or jumps (gt08, loc01) and hurts when
-cuVSLAM is good (loc02). Its fixes are noisier (median about 5–8 cm in flight) than good VIO (about
+cuVSLAM is good (loc02, gt10). Its fixes are noisier (median about 5–8 cm in flight) than good VIO (about
 3 cm). Next steps:
 - weight fixes less and only correct on a significant disagreement;
 - find the in-flight matcher error (scan stacking, attitude at the image stamp);
