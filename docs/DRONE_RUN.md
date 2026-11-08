@@ -33,6 +33,16 @@ The other `~/team_ws/src` package now is `localizer` (localization's). It's need
 
 ## 2. Launch (stack container, one command)
 
+**Simplest: the frozen profile** `conservative.launch.py` fixes everything below except the preset, the pose
+source and `base_height_on_pad_m` (see `path_following/GUIDE.md`):
+
+```bash
+ros2 launch team_path_following conservative.launch.py repo_root:=/root/team_ws/src/Dronehacks mission_preset:=hover \
+  pose_topic:=/visual_slam/tracking/odometry pose_topic_frame:=odom base_height_on_pad_m:=<measured>
+```
+
+The long form with `mission.launch.py` is equivalent:
+
 `mission.launch.py` starts the organizers' `flight_interface` with the same arguments and defaults as
 `competitor_example/competitor.launch.py` (`max_speed_mps` 1.5, `setpoint_rate_hz` 10,
 `allow_mode_request` false, `auto_offboard_on_arm` true, `odometry_topic` /visual_slam/tracking/odometry,

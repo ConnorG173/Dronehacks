@@ -1,6 +1,7 @@
 # path_following
 
 Plan once, then fly the plan with **velocity setpoints only** through the organizers' flight interface.
+**Start with `GUIDE.md`** (profiles, presets, drone/Gazebo/offline commands). Tonight's drone procedure: `docs/DRONE_RUN.md`.
 Design and interface findings: `docs/proposals/path_following.md`. Measurements: `docs/results/path_following.md`.
 
 ```
@@ -13,7 +14,8 @@ team_path_following/          ROS 2 Humble package (ament_python)
     course.py clearance.py    planner config / DHMAP map, distance field
     planner_runner.py         runs planner/ (unchanged) with overrides; keeps the fastest of N plans
   launch/mission.launch.py    flight_interface (exactly as competitor.launch.py) + mission_tracker
-  config/tracker.yaml         gains
+  launch/conservative.launch.py  FROZEN drone profile (Gate B, 1.4x slower, tracker_conservative.yaml)
+  config/tracker.yaml         gains (tunable); tracker_conservative.yaml frozen; tracker_sim_x500.yaml Gazebo
 tools/                        offline: kinsim.py, sweep.py, fit_lag.py, make_random_map.py, plan.py,
                               kinsim_ros.py + e2e_docker.sh (ROS end-to-end), eval_bag.py
 sim/slot0.sh                  Gazebo slot 0: build / fly gt|vio / stop

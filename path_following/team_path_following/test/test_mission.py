@@ -80,3 +80,28 @@ def test_return_touch_and_go():
     seen, pos = sim(m, t_max=90.0)
     assert seen == [IDLE, TAKEOFF, COURSE, LANDING, LANDED, RETURN, LANDING, LANDED, DONE], seen
     assert np.linalg.norm(pos[:2] - back.p[-1][:2]) < 0.2
+
+
+def test_pose_jump_guard():
+    import numpy as np
+    from team_path_following.mission import PoseJumpGuard
+    g = PoseJumpGuard(v_max=1.5)
+    t, p = 0.0, np.zeros(3)
+    for _ in range(100):                       # 1.4 m/s at 25 Hz: fine
+        t += 0.04
+        p = p + np.array([1.4 * 0.04, 0, 0])
+        assert g.update(p, t) is None
+    assert g.update(p + np.array([9.5, 0, 0]), t + 0.04) is not None   # vio21's liftoff jump
+    assert g.update(p, t + 0.08) is not None   # latched
+
+
+def test_pose_fault_aborts_and_descends():
+    import numpy as np
+    from team_path_following.mission import Inputs, Mission, ABORT, IDLE
+    m = Mission(line_traj(), pad_z=0.0)
+    s = dict(offboard=True, armed=True, landed=False, pos=np.array([0.0, 0.0, 0.5]), vel=np.zeros(3), yaw=0.0)
+    m.step(0.02, Inputs(now=0.0, **s))
+    out = m.step(0.02, Inputs(now=0.02, pose_fault='jump', **s))
+    assert m.state == ABORT and out.v[2] < 0 and abs(out.v[0]) + abs(out.v[1]) == 0.0
+    out = m.step(0.02, Inputs(now=0.04, pose_fault='jump', **{**s, 'landed': True}))
+    assert np.allclose(out.v, 0.0)

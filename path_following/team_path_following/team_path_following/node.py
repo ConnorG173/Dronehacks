@@ -31,7 +31,7 @@ from std_msgs.msg import Float64MultiArray, MultiArrayDimension, String
 from . import frames
 from .clearance import ClearanceMap
 from .course import load_course, read_dhmap, write_reverse_config
-from .mission import Inputs, Mission, MissionParams, IDLE
+from .mission import Inputs, Mission, MissionParams, PoseJumpGuard, IDLE
 from .pathfile import Trajectory
 from .planner_runner import plan_best
 from .tracker import TrackerParams
@@ -110,6 +110,7 @@ class MissionTracker(Node):
         d('latency_comp_s', 0.06)          # pose age assumed at arrival (VIO pipeline)
         d('vel_agree_mps', 0.8)            # EKF2 velocity used only within this of the pose's velocity
         d('pose_timeout_s', 0.25)
+        d('pose_jump_m', 0.25)             # pose jump guard slack (m) over max_speed+1 m/s motion; 0 = off
         d('max_speed_mps', 1.5)            # must match the flight interface's
         d('speed_margin_mps', 0.1)
         d('z_ceiling_m', 1.6)              # map z; the interface does not clamp twists
@@ -139,6 +140,8 @@ class MissionTracker(Node):
 
         # inputs
         self.pose = None          # primary (map or odom frame per pose_topic_frame)
+        self.jump_guard = PoseJumpGuard(self.gp('max_speed_mps'), slack_m=self.gp('pose_jump_m')) \
+            if self.gp('pose_jump_m') > 0.0 else None
         self.vio = None
         self.px4_vel = None       # (v_odom ENU, rx)
         self.fi_state = {}
@@ -301,6 +304,10 @@ class MissionTracker(Node):
             self.get_logger().warn(f'{self.gp("pose_topic")} frame_id "{msg.header.frame_id}", expected "{want}"')
         s = _odom_to_sample(msg, self.now())
         if s is not None:
+            if self.jump_guard is not None and self.jump_guard.fault is None:
+                if self.jump_guard.update(s.p, s.rx) is not None:
+                    self.get_logger().error(f'POSE FAULT on {self.gp("pose_topic")}: {self.jump_guard.fault}; '
+                                            'aborting (in flight: descend in place)')
             self.pose = s
 
     def vio_cb(self, msg):
@@ -407,7 +414,8 @@ class MissionTracker(Node):
             cscale = self.clearance.speed_scale(pos, self.gp('clearance_slow_m'), self.gp('clearance_stop_m'))
         out = self.mission.step(self.dt, Inputs(
             now=now, offboard=offboard, armed=bool(fs.get('armed', False)), landed=fs.get('landed'),
-            pos=pos, vel=vel, yaw=yaw, pose_age=age, loc_level=self.loc_level, clearance_scale=cscale))
+            pos=pos, vel=vel, yaw=yaw, pose_age=age, loc_level=self.loc_level, clearance_scale=cscale,
+            pose_fault=self.jump_guard.fault if self.jump_guard is not None else None))
         if out.note:
             self.get_logger().warn(out.note, throttle_duration_sec=1.0)
         if out.state != self.state_name:

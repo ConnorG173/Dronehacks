@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Runs inside pf-dev:humble (see e2e_docker.sh). Env: SIM_ARGS, LAUNCH_ARGS, COURSE.
 COURSE="${COURSE:-/repo/planner/config/course_v3_gateb.yaml}"
+LAUNCH_FILE="${LAUNCH_FILE:-mission.launch.py}"
 set -e
 source /opt/ros/humble/setup.bash
 mkdir -p /ws/src
@@ -16,8 +17,13 @@ fi
 python3 /repo/path_following/tools/kinsim_ros.py $COURSE --exit-when-done $SIM_ARGS &
 SIM=$!
 # shellcheck disable=SC2086
-timeout 150 ros2 launch team_path_following mission.launch.py allow_mode_request:=true \
-  mission_preset:=course course_config:=$COURSE planner_binary:=/repo/planner/build-docker/gcopter_planner \
+if [ "$LAUNCH_FILE" = mission.launch.py ]; then
+  BASE_ARGS="allow_mode_request:=true mission_preset:=course course_config:=$COURSE"
+else
+  BASE_ARGS="repo_root:=/repo"   # a frozen profile: it fixes its own course and settings
+fi
+timeout 150 ros2 launch team_path_following $LAUNCH_FILE $BASE_ARGS \
+  planner_binary:=/repo/planner/build-docker/gcopter_planner \
   out_dir:=/tmp/pf_out $LAUNCH_ARGS &
 TRK=$!
 set +e

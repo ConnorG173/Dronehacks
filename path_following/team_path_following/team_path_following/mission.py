@@ -54,6 +54,30 @@ class Inputs:
     pose_age: float = 0.0
     loc_level: str = 'OK'          # OK | WARN | ERROR
     clearance_scale: float = 1.0
+    pose_fault: Optional[str] = None   # latched by PoseJumpGuard: the pose source is not trustworthy
+
+
+class PoseJumpGuard:
+    """Latches a fault when consecutive poses imply an impossible motion (a VIO relocalisation or
+    divergence: Gazebo run vio21 jumped 9.5 m in one message at liftoff, and PX4, fusing the same VIO,
+    flew blind). Allowed step = slack_m + (v_max + margin) * dt between receive times."""
+
+    def __init__(self, v_max, slack_m=0.25, margin_mps=1.0, min_dt=0.02):
+        self.v_max, self.slack_m, self.margin, self.min_dt = float(v_max), float(slack_m), float(margin_mps), float(min_dt)
+        self.last = None
+        self.fault = None
+
+    def update(self, p, t):
+        p = np.asarray(p, float)
+        if self.fault is None and self.last is not None:
+            lp, lt = self.last
+            dt = max(t - lt, self.min_dt)
+            step = float(np.linalg.norm(p - lp))
+            allowed = self.slack_m + (self.v_max + self.margin) * dt
+            if step > allowed:
+                self.fault = f'pose jumped {step:.2f} m in {dt:.3f} s (allowed {allowed:.2f} m)'
+        self.last = (p, t)
+        return self.fault
 
 
 @dataclass
@@ -84,6 +108,7 @@ class Mission:
         self.t_finished = None
         self.t_touch = None
         self.events = []               # (time, state) transitions for logs/metrics
+        self.fault_land = False        # ABORT on a pose fault in flight: descend in place
 
     @property
     def public_state(self):
@@ -120,6 +145,14 @@ class Mission:
                 self._go(s.now, ABORT, 'offboard lost in flight')
             return Output(np.zeros(3), 0.0, self.public_state)
 
+        if s.pose_fault and self.state in (IDLE, TAKEOFF, COURSE, LANDING):
+            # in flight: no horizontal command, slow descent (PX4 height is rangefinder-based);
+            # on the pad: never take off. The pilot takes over either way.
+            self.fault_land = self.state != IDLE
+            self._go(s.now, ABORT, f'pose fault: {s.pose_fault}')
+        if self.state == ABORT and self.fault_land and s.armed and not s.landed:
+            return Output(np.array([0.0, 0.0, -self.p.land_vz_slow]), 0.0, self.public_state,
+                          'pose fault: descending in place, pilot take over')
         if self.state in (DONE, ABORT):
             return self._zero()
 
