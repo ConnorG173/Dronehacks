@@ -25,7 +25,7 @@ from sensor_msgs.msg import Imu
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PX4_QOS = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, durability=DurabilityPolicy.VOLATILE,  # matches any publisher
-                     history=HistoryPolicy.KEEP_LAST, depth=1)
+                     history=HistoryPolicy.KEEP_LAST, depth=100)   # deep: never drop IMU samples
 FRAME = 'team_imu_frame'
 
 

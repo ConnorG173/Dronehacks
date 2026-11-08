@@ -99,6 +99,8 @@ def main():
     ap.add_argument('--check', action='store_true')
     ap.add_argument('--out')
     ap.add_argument('--guard', action='store_true')
+    ap.add_argument('--guard-armed', action='store_true',
+                    help='record mode: stop (logger + frame grabber) only if PX4 ARMS; hand-carrying is not landed')
     ap.add_argument('--calib', default=_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'calib.json'))
     a = ap.parse_args()
     from px4_msgs.msg import SensorCombined, VehicleAttitude, VehicleLandDetected, VehicleStatus
@@ -185,15 +187,20 @@ def main():
     while rclpy.ok():
         rclpy.spin_once(n, timeout_sec=0.01)
         now = time.time()
+        stop = False
         if a.guard and now - t_start > 5.0:     # 5 s grace for the first telemetry after start-up
-            if s['armed'] is not False or s['landed'] is not True or now - s['t_status'] > 3.0 \
-                    or now - s['t_land'] > 3.0:
+            stop = s['armed'] is not False or s['landed'] is not True or now - s['t_status'] > 3.0 \
+                or now - s['t_land'] > 3.0
+        if a.guard_armed and now - t_start > 5.0:
+            stop = stop or s['armed'] is True
+        if stop:
+            if True:
                 msg = (f"GUARD {time.strftime('%T')}: armed={s['armed']} landed={s['landed']} "
                        f"status age {now - s['t_status']:.1f} s -> stopping the shadow")
                 print(msg, flush=True)
                 f.write(json.dumps({'t': now, 'guard': msg}) + '\n')
                 f.close()
-                for pat in ('__node:=team_imu_vio', 'team_imu_prep.py', '__node:=team_imu_tf'):
+                for pat in ('__node:=team_imu_vio', 'team_imu_prep.py', '__node:=team_imu_tf', 'grab_frames.py'):
                     subprocess.run(['pkill', '-f', pat], check=False)
                 return
         if now - t_log >= 0.1:
