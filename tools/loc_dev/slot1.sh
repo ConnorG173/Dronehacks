@@ -89,14 +89,22 @@ fly)
   grep -E "re-acquired|jump|recovered|anchored" "$REPO/$out/loc.log" | tail -5 || true
   ;;
 reset)
-  # fresh world + PX4, drone back on the launch mark (EKF2 restarts itself at 30 s; arm after ~80 s)
+  # fresh world + PX4, drone back on the launch mark. Gazebo sometimes comes up without camera
+  # images: retry up to 3 times until /oak/left/image_mono flows.
   bash "$0" stop || true
-  bash "$REPO/sim/run_sim.sh" 1 stop || true
-  sleep 3
-  bash "$REPO/sim/run_sim.sh" 1
-  echo "settling 150 s (Gazebo loads the textured course in ~2 min, EKF2 restarts after PX4)..."
-  sleep 150
-  bash "$REPO/sim/tools/check_sim.sh" 2>&1 | grep -iE "rate|xy_valid|armed|blank|image" | head -10
+  for attempt in 1 2 3; do
+    bash "$REPO/sim/run_sim.sh" 1 stop || true
+    sleep 3
+    bash "$REPO/sim/run_sim.sh" 1
+    echo "settling 150 s (attempt $attempt; Gazebo loads the textured course in ~2 min, EKF2 restarts after PX4)..."
+    sleep 150
+    bash "$REPO/sim/tools/check_sim.sh" > "$REPO/$RUNS/check_sim.txt" 2>&1 || true
+    grep -iE "rate|xy_valid|armed|blank|image|FAIL" "$REPO/$RUNS/check_sim.txt" | head -10
+    if grep -q "/oak/left/image_mono: average rate" "$REPO/$RUNS/check_sim.txt" && grep -q "xy_valid: true" "$REPO/$RUNS/check_sim.txt"; then
+      echo "sim healthy"; break
+    fi
+    echo "sim not healthy, restarting"
+  done
   ;;
 stop)
   tmux kill-window -t "$TMUX_SESSION:team" 2>/dev/null || true
