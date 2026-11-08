@@ -89,6 +89,11 @@ class MissionTracker(Node):
         d('planner_budget_s', 45.0)
         d('out_dir', '/tmp/team_path_following')
         d('time_scale', 1.0)               # >1 slows the loaded plan uniformly
+        d('mission_preset', 'course')     # course | hover (take off, hold, land on the pad) |
+                                           # first_leg (to the first checkpoint slowly, hold, land there)
+        d('hover_hold_s', 10.0)            # hover preset: hold time at HoverHeight over the pad
+        d('first_leg_speed_mps', 0.4)      # first_leg preset: planner MaxVelMag
+        d('first_leg_hold_s', 5.0)         # first_leg preset: hold at the checkpoint before landing
         d('return_config', '')             # '' off | 'reverse' (course goal -> start) | a config path
         d('return_path_file', '')          # fly this DHPATH file as the return instead of planning
         d('return_z_ceiling_m', 1.6)       # map z ceiling on the return leg (rule 7.7 exception)
@@ -187,23 +192,46 @@ class MissionTracker(Node):
     def prepare(self):
         """Plan (or load), convert, build the clearance map. Runs off the executor."""
         try:
+            preset = self.gp('mission_preset')
+            if preset not in ('course', 'hover', 'first_leg'):
+                raise ValueError(f'mission_preset must be course, hover or first_leg, not {preset!r}')
             path_file = self.gp('path_file')
-            if not path_file:
-                overrides = {}
-                for kv in filter(None, (s.strip() for s in self.gp('planner_overrides').replace('@', ';').split(';'))):
-                    k, v = kv.split('=', 1)
-                    overrides[k.strip()] = v.strip()
-                path_file, summary = plan_best(
-                    self.gp('planner_binary'), self.course.path, self.gp('out_dir'), overrides,
-                    candidates=int(self.gp('planner_candidates')), budget_s=float(self.gp('planner_budget_s')),
-                    log=self.get_logger().info)
-                self.get_logger().info(summary)
-            traj = Trajectory.load(path_file, self.course)
+            overrides = {}
+            for kv in filter(None, (s.strip() for s in self.gp('planner_overrides').replace('@', ';').split(';'))):
+                k, v = kv.split('=', 1)
+                overrides[k.strip()] = v.strip()
+            if preset == 'hover':
+                traj = Trajectory.hold(self.course.hover_point, self.course.start_heading_rad,
+                                       float(self.gp('hover_hold_s')))
+                path_file = 'hover'
+            else:
+                config = self.course.path
+                if preset == 'first_leg':
+                    if not self.course.checkpoints:
+                        raise ValueError('first_leg preset needs at least one Checkpoint in the course config')
+                    c = self.course.checkpoints[0].center
+                    os.makedirs(self.gp('out_dir'), exist_ok=True)
+                    config = os.path.join(self.gp('out_dir'), 'first_leg.yaml')
+                    self.course.write_derived(config, {'Goal': f'[{c[0]:.4f}, {c[1]:.4f}, {c[2]:.4f}]'},
+                                              drop=('Checkpoint',))
+                    overrides['MaxVelMag'] = str(float(self.gp('first_leg_speed_mps')))
+                    path_file = ''
+                if not path_file:
+                    path_file, summary = plan_best(
+                        self.gp('planner_binary'), config, self.gp('out_dir'), overrides,
+                        candidates=int(self.gp('planner_candidates')), budget_s=float(self.gp('planner_budget_s')),
+                        log=self.get_logger().info)
+                    self.get_logger().info(summary)
+                traj = Trajectory.load(path_file, self.course)
+                if preset == 'first_leg':
+                    traj = traj.with_hold(float(self.gp('first_leg_hold_s')))
             if self.gp('time_scale') != 1.0:
                 traj = traj.time_scaled(float(self.gp('time_scale')))
+            self.get_logger().info(f'mission preset: {preset}')
             if self.gp('clearance_slow_m') > 0.0:
                 self.clearance = ClearanceMap(read_dhmap(self.course.map_file), self.course.map_bound)
-            rtraj, rcourse = self.prepare_return(overrides if not self.gp('path_file') else {})
+            rtraj, rcourse = (self.prepare_return(overrides if not self.gp('path_file') else {})
+                              if preset == 'course' else (None, None))
             rtp = None
             if rtraj is not None:
                 import copy

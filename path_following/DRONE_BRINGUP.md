@@ -11,6 +11,13 @@ exists, then zero twists. After the pilot arms (Altitude) and switches to Positi
 flies the plan with velocity setpoints, lands on the pad, and PX4 auto-disarms. **It never sends a pose.**
 `/team/mission/state`: idle → takeoff → course → landing → landed → done (abort on any Offboard loss).
 
+**Route (default): Gate B**, `planner/config/course_v3_gateb.yaml`: maze M1–M3 → tube → chicane S through
+Gate B (the opening at the north end of the C2 wall line) → pad. Plan ~19.6 s at MaxVelMag 1.2; z capped at
+1.6 m in the planner (68 in rule). The window route (+5) is `course_config:=<repo>/planner/config/course_v3.yaml`.
+Gazebo showed VIO jumping at the window: a flat wall fills the stereo view on approach. Fly it only after
+Gate B finishes reliably. Tracker lag `tau_v` 0.66 / `t_delay` 0.18 (Gazebo fit). Over-estimating the lag
+is benign; under-estimating touched walls in kinsim.
+
 ## 1. Build (drone host shell, in the team workspace; the repo is cloned in `~/team_ws/src`)
 
 ```bash

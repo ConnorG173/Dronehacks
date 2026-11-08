@@ -116,6 +116,24 @@ class Trajectory:
         k = lo + int(np.argmin(d))
         return float(self.t[k]), float(d[k - lo])
 
+    @classmethod
+    def hold(cls, p, yaw, seconds, dt=0.01):
+        """Stand still at p (map frame) with heading yaw for `seconds`."""
+        n = max(2, int(round(seconds / dt)) + 1)
+        t = np.linspace(0.0, max(seconds, dt), n)
+        z = np.zeros((n, 3))
+        return cls(t, np.tile(np.asarray(p, float), (n, 1)), z, z.copy(), np.full(n, float(yaw)), np.zeros(n))
+
+    def with_hold(self, seconds, dt=0.01):
+        """Copy with `seconds` of standing still at the final point appended (velocity and
+        acceleration zero there; the plan already ends at rest)."""
+        if seconds <= 0.0:
+            return self
+        h = Trajectory.hold(self.p[-1], self.yaw[-1], seconds, dt)
+        cat = lambda a, b: np.concatenate([a, b[1:]])  # noqa: E731
+        return Trajectory(cat(self.t, h.t + self.t[-1]), cat(self.p, h.p), cat(self.v, h.v), cat(self.a, h.a),
+                          cat(self.yaw, h.yaw), cat(self.yaw_rate, h.yaw_rate))
+
     def time_scaled(self, k):
         """Uniformly slowed (k > 1) or sped up (k < 1) copy: exact for any path."""
         return Trajectory(self.t * k, self.p, self.v / k, self.a / (k * k), self.yaw, self.yaw_rate / k)

@@ -65,3 +65,16 @@ def test_planner_output_if_present():
     assert np.allclose(tr.p[0], course.hover_point, atol=1e-6)
     assert np.allclose(tr.p[-1], course.goal, atol=1e-6)
     _ = frames
+
+
+def test_hold_and_with_hold():
+    import numpy as np
+    from team_path_following.pathfile import Trajectory
+    h = Trajectory.hold([1.0, 2.0, 1.0], 0.5, 10.0)
+    assert abs(h.duration - 10.0) < 1e-9 and np.allclose(h.p, [1.0, 2.0, 1.0]) and np.allclose(h.v, 0.0)
+    t = np.linspace(0, 2, 201)
+    p = np.stack([t, 0 * t, 0 * t + 1], 1)
+    tr = Trajectory(t, p, np.gradient(p, t, axis=0), np.zeros_like(p), np.zeros_like(t), np.zeros_like(t))
+    w = tr.with_hold(3.0)
+    assert abs(w.duration - 5.0) < 1e-9 and np.allclose(w.p[-1], p[-1]) and np.all(np.diff(w.t) > 0)
+    assert np.allclose(w.v[len(t):], 0.0) and tr.with_hold(0.0) is tr
