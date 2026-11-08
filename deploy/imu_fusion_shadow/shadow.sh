@@ -19,11 +19,11 @@ C=skybeta-stack
 ENVS="source /opt/ros/humble/setup.bash; source /root/skybeta_ws/install/local_setup.bash; cd $KIT"
 dx() { docker exec "$C" bash -c "$ENVS; $*"; }
 dxd() { docker exec -d "$C" bash -c "$ENVS; $*"; }
-PAT='__node:=team_imu_vio|team_imu_prep.py|__node:=team_imu_tf|team_imu_log.py|grab_frames.py'
+PAT='__node:=team_imu_vio|team_imu_prep.py|__node:=team_imu_tf|team_imu_log.py|grab_frames.py|heading_fix.py'
 
 stop_all() {
   # bracketed patterns ([t]eam...) never match the pkill's own bash -c command line
-  docker exec "$C" bash -c "pkill -INT -f '[t]eam_imu_log.py'; sleep 1; pkill -f '__node:=[t]eam_imu_vio'; pkill -f '[t]eam_imu_prep.py'; pkill -f '__node:=[t]eam_imu_tf'; pkill -f '[g]rab_frames.py'" 2>/dev/null
+  docker exec "$C" bash -c "pkill -INT -f '[t]eam_imu_log.py'; sleep 1; pkill -f '__node:=[t]eam_imu_vio'; pkill -f '[t]eam_imu_prep.py'; pkill -f '__node:=[t]eam_imu_tf'; pkill -f '[g]rab_frames.py'; pkill -f '[h]eading_fix.py'" 2>/dev/null
   sleep 2
   docker exec "$C" bash -c "pkill -9 -f '__node:=[t]eam_imu_vio'; pkill -9 -f '[t]eam_imu_prep.py'" 2>/dev/null
   true
@@ -41,7 +41,8 @@ status)
   ls -t "$HOSTKIT/logs" 2>/dev/null | head -1 | sed 's/^/latest log dir: /'
   exit 0 ;;
 stop) stop_all; echo "shadow stopped"; exit 0 ;;
-record)
+record|heading)
+  # heading: also the live gyro heading-fix node (SHADOW: publishes /team_heading/odometry only; nothing reads it)
   # Diagnostics only, NO second cuVSLAM: logger (flight VIO raw + levelled, PX4 attitude, PX4/OAK gyro) and
   # left-camera JPEGs at 2 Hz. Read-only. Guard: stops if PX4 ARMS (carrying the drone is fine).
   docker exec "$C" bash -c "$ENVS; python3 $KIT/team_imu_log.py --check" | head -1
@@ -57,10 +58,13 @@ while 'a' not in st and time.time() - t0 < 6: rclpy.spin_once(n, timeout_sec=0.1
 raise SystemExit(0 if st.get('a') == 1 else 1)
 PY" || { echo "REFUSING: PX4 not reporting disarmed"; exit 1; }
   stop_all
-  STAMP="$(date -u +%Y%m%dT%H%M%SZ)"; LOG="logs/${STAMP}_record"; mkdir -p "$HOSTKIT/$LOG"
+  STAMP="$(date -u +%Y%m%dT%H%M%SZ)"; LOG="logs/${STAMP}_$1"; mkdir -p "$HOSTKIT/$LOG"
+  if [[ "$1" == heading ]]; then
+    dxd "exec nice -n 5 python3 -u $KIT/heading_fix.py node --gyro-topic ${PX4_IMU_TOPIC:-/fmu/out/sensor_combined} > $KIT/$LOG/heading_fix.log 2>&1"
+  fi
   dxd "exec nice -n 10 python3 -u $KIT/grab_frames.py --out $KIT/$LOG/frames --hz 2 > $KIT/$LOG/grab.log 2>&1"
   dxd "exec python3 -u $KIT/team_imu_log.py --out $KIT/$LOG --guard-armed > $KIT/$LOG/logger.log 2>&1"
-  sleep 8; tail -1 "$HOSTKIT/$LOG/logger.log"; ls "$HOSTKIT/$LOG/frames" 2>/dev/null | wc -l | sed 's/$/ frames so far/'
+  sleep 8; tail -1 "$HOSTKIT/$LOG/logger.log"; [[ "$1" == heading ]] && tail -1 "$HOSTKIT/$LOG/heading_fix.log"; ls "$HOSTKIT/$LOG/frames" 2>/dev/null | wc -l | sed 's/$/ frames so far/'
   echo "recording to $HOSTKIT/$LOG  (stop: shadow.sh stop)"; exit 0 ;;
 start) ;;
 *) sed -n 2,16p "$0"; exit 1 ;;

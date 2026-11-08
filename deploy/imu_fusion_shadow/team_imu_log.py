@@ -32,7 +32,7 @@ PX4_QOS = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, durability=Durab
 GYRO_QOS = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, durability=DurabilityPolicy.VOLATILE,
                       history=HistoryPolicy.KEEP_LAST, depth=100)   # deep: a gyro sample lost is heading lost
 EST = {'raw': '/visual_slam/tracking/odometry', 'lev': '/claude/vio_leveled/odometry',
-       'imu': '/team_imu/visual_slam/tracking/odometry'}
+       'imu': '/team_imu/visual_slam/tracking/odometry', 'hfix_live': '/team_heading/odometry'}
 STATUS = {'raw': '/visual_slam/status', 'imu': '/team_imu/visual_slam/status'}
 FLU_FRD = np.diag([1.0, -1.0, -1.0])
 
@@ -207,7 +207,7 @@ def main():
                 print(msg, flush=True)
                 f.write(json.dumps({'t': now, 'guard': msg}) + '\n')
                 f.close()
-                for pat in ('__node:=team_imu_vio', 'team_imu_prep.py', '__node:=team_imu_tf', 'grab_frames.py'):
+                for pat in ('__node:=team_imu_vio', 'team_imu_prep.py', '__node:=team_imu_tf', 'grab_frames.py', 'heading_fix.py'):
                     subprocess.run(['pkill', '-f', pat], check=False)
                 return
         if now - t_log >= 0.1:

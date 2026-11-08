@@ -9,7 +9,8 @@ Fix: take heading INCREMENTS from the gyro and everything else from the levelled
   delta    heading correction (rad). Each step: delta += (gyro heading change - VIO heading change),
            then a very slow pull back toward VIO: delta -= delta * dt / tau (tau 1 h: VIO heading error is
            permanent in its frame; the pull only bounds residual gyro-bias drift over a whole boot).
-  gyro     body rates, bias estimated while the drone is still (gyro AND VIO quiet for >= 2 s); heading
+  gyro     body rates, bias = time-weighted mean of the gyro over all still time (gyro AND VIO quiet for
+           >= 2 s; >= 0.5 s of still data before it is used; 2 min forgetting for warm-up drift); heading
            change = yaw change of R_vio_prev @ exp(rate * dt), so roll/pitch come from the levelled VIO.
   output   R = Rz(delta) R_vio;  p += Rz(delta) (p_vio - p_vio_prev)  (re-integrated, not rotated about the
            origin). A VIO jump (> jump_m in one step, or > jump_deg of heading) is absorbed: position does not
@@ -76,11 +77,12 @@ def mat_to_quat(R):
 
 
 class HeadingFix:
-    def __init__(self, tau_s=3600.0, still_rate=0.03, still_move=0.03, still_s=2.0, bias_tc_s=10.0,
+    def __init__(self, tau_s=3600.0, still_rate=0.03, still_move=0.03, still_s=2.0, bias_tc_s=120.0,
                  jump_m=0.5, jump_deg=20.0):
         self.tau, self.still_rate, self.still_move, self.still_s = tau_s, still_rate, still_move, still_s
         self.bias_tc, self.jump_m, self.jump = bias_tc_s, jump_m, math.radians(jump_deg)
         self.delta, self.bias, self.bias_n = 0.0, np.zeros(3), 0
+        self.bias_r, self.bias_T, self.bias_min_s = np.zeros(3), 0.0, 0.5   # time-weighted still-gyro sums
         self.p_out = self.p_prev = self.R_prev = None
         self.still_for, self.jumps, self.still_anchor = 0.0, 0, None
 
@@ -106,8 +108,13 @@ class HeadingFix:
             else:
                 self.still_anchor, self.still_for = None, 0.0
             if self.still_for >= self.still_s:
-                a = min(1.0, dt / self.bias_tc) if self.bias_n > 0 else 1.0
-                self.bias = (1 - a) * self.bias + a * (r / dt)
+                # time-weighted mean of the still gyro over ALL still time, forgetting with bias_tc of still time
+                # (tracks warm-up drift). Not a per-sample blend: one 16 ms sample is far too noisy to seed it.
+                f = math.exp(-dt / self.bias_tc)
+                self.bias_r = self.bias_r * f + r
+                self.bias_T = self.bias_T * f + dt
+                if self.bias_T >= self.bias_min_s:
+                    self.bias = self.bias_r / self.bias_T
                 self.bias_n += 1
             rc = r - self.bias * dt
             dpsi_g = wrap(yaw(self.R_prev @ rodrigues(rc)) - yaw(self.R_prev))
@@ -201,7 +208,7 @@ def node(a):
     n.create_subscription(Odometry, '/claude/vio_leveled/odometry', on_vio, 10)
     n.create_timer(5.0, lambda: n.get_logger().info(
         f'heading correction {math.degrees(hf.delta):+.2f} deg, bias {np.round(np.degrees(hf.bias), 3).tolist()} '
-        f'deg/s, jumps absorbed {hf.jumps}'))
+        f'deg/s from {hf.bias_T:.0f} s still, jumps absorbed {hf.jumps}'))
     rclpy.spin(n)
 
 

@@ -72,7 +72,7 @@ def main():
     out = {}
     print(f"{'est':4s} {'Hz':>5s} {'lost%':>6s} {'closure h':>9s} {'z':>7s} {'yaw':>7s} {'tilt0':>6s} {'tiltEnd':>7s} "
           f"{'tiltMax':>7s} {'path':>6s}")
-    for k in ('raw', 'lev', 'imu', 'hfix'):
+    for k in ('raw', 'lev', 'imu', 'hfix', 'hfix_live'):
         have = np.array([k in r for r in rows])
         if have.sum() < 20:
             print(f'{k:4s} no data')
