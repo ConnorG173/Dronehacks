@@ -22,6 +22,7 @@ DDS=/root/team/sim/dds/fastdds_udp.xml
 IN_C="source /opt/ros/humble/setup.bash && source /root/skybeta_ws/install/setup.bash && cd /root/team"
 RUNS=path_following/runs/sim
 COURSE="${COURSE:-planner/config/course_v3_gateb.yaml}"   # COURSE=planner/config/course_v3.yaml: window route
+CP_VIA="${CP_VIA-5,6}"   # routing-aid checkpoints in course_v3_gateb (not scored as course checkpoints); "" for course_v3
 
 dexec() { docker exec -e ROS_DOMAIN_ID="$ROS_DOMAIN_ID" -e FASTRTPS_DEFAULT_PROFILES_FILE="$DDS" "$@"; }
 
@@ -67,7 +68,7 @@ fly)
   dexec "$CONTAINER" pkill -INT -f "ros2 bag record" || true
   sleep 3
   dexec "$CONTAINER" bash -lc "$IN_C && python3 path_following/tools/eval_bag.py $out/bag $COURSE $out/plan/path.bin \
-    --name '$name' --notes '$mode $*' --append $out/results_row.md; python3 path_following/tools/fit_lag.py $out/bag; python3 path_following/tools/vio_err.py $out/bag" \
+    --name '$name' --notes '$mode $*' --via '$CP_VIA' --append $out/results_row.md; python3 path_following/tools/fit_lag.py $out/bag; python3 path_following/tools/vio_err.py $out/bag" \
     | tee "$REPO/$out/metrics.txt"
   ;;
 sysid)

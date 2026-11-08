@@ -91,12 +91,21 @@ def main():
     ap.add_argument('--name', default='')
     ap.add_argument('--notes', default='')
     ap.add_argument('--append')
+    ap.add_argument('--via', default='', help='1-based checkpoint numbers that are routing aids, not course '
+                    'checkpoints (e.g. 5,6 for course_v3_gateb): left out of real_checkpoints')
+    ap.add_argument('--pad-r', type=float, default=0.51, help='pad ring radius for in_pad (m; CAD ring r20 in)')
     a = ap.parse_args()
     course = load_course(a.course)
     traj = Trajectory.load(a.path, course)
     import warnings
     warnings.simplefilter('ignore', RuntimeWarning)
     r = evaluate(a.bag, course, traj)
+    via = {int(x) for x in a.via.split(',') if x.strip()}
+    real = [k for k in range(1, len(course.checkpoints) + 1) if k not in via]
+    missed_real = [k for k in r['cp_missed'] if k in real]
+    r['real_checkpoints'] = f'{len(real) - len(missed_real)}/{len(real)}'
+    r['real_missed'] = missed_real
+    r['in_pad'] = bool(r['land_err_m'] <= a.pad_r)
     print(json.dumps(r))
     if a.append:
         cols = ['result', 'mission_time_s', 'course_time_s', 'plan_time_s', 'max_xt_m', 'rms_xt_m',
