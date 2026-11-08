@@ -126,7 +126,13 @@ class HeadingFix:
             self.jumps += 1                       # VIO reset/jump: keep position, gyro held heading above
         else:
             self.p_out = self.p_out + rotz(self.delta) @ dp
-        self.p_prev, self.R_prev = p_vio, R_vio
+        self.p_prev = p_vio
+        if r is not None and dt > 0:
+            # Advance the heading reference ONLY when gyro data covered this step. With VIO at 60 Hz and the
+            # gyro at ~110 Hz some VIO steps carry no gyro sample; the next gyro sample then spans both steps,
+            # so the VIO heading change must be measured over the same span (else every skipped step's real
+            # turn was added to the correction: live over-correction, 2026-11-08 walk 3).
+            self.R_prev = R_vio
         return rotz(self.delta) @ R_vio, self.p_out.copy()
 
 
