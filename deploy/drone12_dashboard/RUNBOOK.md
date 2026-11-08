@@ -76,6 +76,16 @@ Fly in order: hover, then course. With the old route: hover, then first_leg, the
 | A dashboard pose setpoint, or interface Hold | Yields: publishes nothing from then on |
 | Planner fails | Publishes nothing: arming gives no autonomy |
 
+## Verified in Gazebo (old course, Gate B route, 2026-11-08)
+
+Setup for these runs:
+- Dashboard mode, with a stand-in flight interface.
+- PX4 put in Offboard while disarmed, then armed (`pilot.py go_offboard`), as on the drone.
+
+Results:
+- **cv4a, full course:** done, course 31.6 s, 0 touches at 0.25 m, 5/5 openings, landed 3.8 cm from pad centre, cross-track 6.6 cm average.
+- **cv2b, back-off test:** a pose injected mid-course gives `YIELDED to dashboard pose setpoint`, then the abort; nothing is published after.
+
 ## Not verified on hardware
 
 - Lag 0.66/0.18 comes from Gazebo's x500, not the Sky Beta.
