@@ -67,10 +67,22 @@ def evaluate(bag, course, traj, radius=0.20):
     passed, miss = score_checkpoints(p[fly], course.checkpoints)
     hit, worst = sum(passed), (max(miss) if miss else 0.0)
     touches = int(np.sum(np.diff((c < radius).astype(int)) == 1) + (1 if len(c) and c[0] < radius else 0))
+    # course time on the node's own clock (sim time in Gazebo with tracker_use_sim_time): RTF-independent
+    t_node = None
+    dbg = msgs['/team/tracker/debug']
+    if dbg and dbg[0][1].layout.dim:
+        lab = dbg[0][1].layout.dim[0].label.split(',')
+        it, ist = lab.index('t'), lab.index('state')
+        rows = [(m.data[it], m.data[ist]) for _, m in dbg if len(m.data) > max(it, ist)]
+        tc = next((tt for tt, ss in rows if ss == 2), None)
+        tlnd = next((tt for tt, ss in rows if ss == 3), None)
+        if tc is not None and tlnd is not None:
+            t_node = round(float(tlnd - tc), 2)
     return dict(
         result=st[-1][1].data if st else '?',
         mission_time_s=round(tl - tk, 2) if tl and tk else None,
         course_time_s=round(t1 - t0, 2) if t1 and t0 else None,
+        course_time_node_s=t_node,
         plan_time_s=round(traj.duration, 2),
         max_xt_m=round(float(np.nanmax(xt)), 3),
         rms_xt_m=round(float(np.sqrt(np.nanmean(xt ** 2))), 3),
@@ -93,6 +105,7 @@ def main():
     ap.add_argument('--append')
     ap.add_argument('--via', default='', help='1-based checkpoint numbers that are routing aids, not course '
                     'checkpoints (e.g. 5,6 for course_v3_gateb): left out of real_checkpoints')
+    ap.add_argument('--cp-tol', type=float, default=0.15, help='real checkpoint: within this of its planning box (m)')
     ap.add_argument('--pad-r', type=float, default=0.51, help='pad ring radius for in_pad (m; CAD ring r20 in)')
     a = ap.parse_args()
     course = load_course(a.course)
@@ -102,7 +115,22 @@ def main():
     r = evaluate(a.bag, course, traj)
     via = {int(x) for x in a.via.split(',') if x.strip()}
     real = [k for k in range(1, len(course.checkpoints) + 1) if k not in via]
-    missed_real = [k for k in r['cp_missed'] if k in real]
+    # a real checkpoint is an opening, wider than its planning box: crossed if the path comes within
+    # --cp-tol of the box (planning boxes are a few cm; the openings are 0.9 m)
+    from team_path_following.course import Box
+    msgs = read_bag(a.bag, ['/sim/ground_truth/odom', '/team/mission/state'])
+    pts = np.array([[m.pose.pose.position.x, m.pose.pose.position.y, m.pose.pose.position.z]
+                    for _, m in msgs['/sim/ground_truth/odom']])
+    tt = np.array([s_ for s_, _ in msgs['/sim/ground_truth/odom']])
+    first = {}
+    for s_, m in msgs['/team/mission/state']:
+        first.setdefault(m.data, s_)
+    t0, tl = first.get('course', np.inf), first.get('landed', tt[-1] if len(tt) else np.inf)
+    sel = pts[(tt >= t0) & (tt <= tl)]
+    loose = [Box(b.center, b.half + a.cp_tol) for b in course.checkpoints]
+    lp, _ = score_checkpoints(sel, loose) if len(sel) else ([False] * len(loose), None)
+    missed_real = [k for k in real if not lp[k - 1]]
+    r['real_cp_tol_m'] = a.cp_tol
     r['real_checkpoints'] = f'{len(real) - len(missed_real)}/{len(real)}'
     r['real_missed'] = missed_real
     r['in_pad'] = bool(r['land_err_m'] <= a.pad_r)
