@@ -44,6 +44,47 @@ def read_bag(path, topics):
     return out
 
 
+def opening_line(center, occ, z_band=0.06):
+    """The opening a checkpoint sits in, from the map: its narrowest line through the centre, between the
+    nearest occupied point A and the nearest occupied point on the other side of the centre B (xy, at the
+    centre's height). Returns (A, B) in xy, or None."""
+    c = np.asarray(center, float)
+    sl = occ[np.abs(occ[:, 2] - c[2]) < z_band][:, :2]
+    if len(sl) < 2:
+        return None
+    d = sl - c[:2]
+    r = np.linalg.norm(d, axis=1)
+    ia = int(np.argmin(r))
+    other = (d @ d[ia]) < 0.0
+    if not other.any():
+        return None
+    ib = int(np.flatnonzero(other)[np.argmin(r[other])])
+    return sl[ia], sl[ib]
+
+
+def cross_opening(pts, line, clear, reach):
+    """First crossing of segment A-B by the path (xy). Returns (crossed_whole_drone, lateral margin to the
+    nearer end minus nothing, 3D clearance at the crossing) or (False, None, None) if never crossed."""
+    A, B = line
+    ab = B - A
+    L = float(np.linalg.norm(ab))
+    for k in range(len(pts) - 1):
+        p, q = pts[k, :2], pts[k + 1, :2]
+        pq = q - p
+        den = pq[0] * ab[1] - pq[1] * ab[0]
+        if abs(den) < 1e-12:
+            continue
+        w = A - p
+        t = (w[0] * ab[1] - w[1] * ab[0]) / den      # along the path step
+        u = (w[0] * pq[1] - w[1] * pq[0]) / den      # along A-B
+        if 0.0 <= t <= 1.0 and 0.0 <= u <= 1.0:
+            x = pts[k] + t * (pts[k + 1] - pts[k])
+            lat = min(u, 1.0 - u) * L
+            cl = float(clear.distance(x[None])[0])
+            return bool(lat >= reach and cl >= reach), round(lat, 3), round(cl, 3)
+    return False, None, None
+
+
 def evaluate(bag, course, traj, radius=0.20):
     msgs = read_bag(bag, ['/sim/ground_truth/odom', '/team/mission/state', '/team/tracker/debug'])
     gt = msgs['/sim/ground_truth/odom']
@@ -106,6 +147,8 @@ def main():
     ap.add_argument('--via', default='', help='1-based checkpoint numbers that are routing aids, not course '
                     'checkpoints (e.g. 5,6 for course_v3_gateb): left out of real_checkpoints')
     ap.add_argument('--cp-tol', type=float, default=0.15, help='real checkpoint: within this of its planning box (m)')
+    ap.add_argument('--reach', type=float, default=0.29, help='prop reach: strict touch and opening margin (m)')
+    ap.add_argument('--max-course-s', type=float, default=30.0, help='clean: course time limit (node clock)')
     ap.add_argument('--pad-r', type=float, default=0.51, help='pad ring radius for in_pad (m; CAD ring r20 in)')
     a = ap.parse_args()
     course = load_course(a.course)
@@ -134,6 +177,34 @@ def main():
     r['real_checkpoints'] = f'{len(real) - len(missed_real)}/{len(real)}'
     r['real_missed'] = missed_real
     r['in_pad'] = bool(r['land_err_m'] <= a.pad_r)
+    # strict scoring (go/no-go for the drone): touches at the prop reach, checkpoints = whole drone through
+    # the actual opening (line from the map), course time on the node clock
+    occ = read_dhmap(course.map_file)
+    clear = ClearanceMap(occ, course.map_bound)
+    sel_t = tt[(tt >= t0) & (tt <= tl)]
+    t1 = first.get('landing', tl)
+    cs = clear.distance(pts[(tt >= t0) & (tt <= t1)]) if len(sel) else np.array([np.inf])
+    below = cs < a.reach
+    r['touches_strict'] = int(np.sum(np.diff(below.astype(int)) == 1) + (1 if len(below) and below[0] else 0))
+    seg = pts[(tt >= t0) & (tt <= t1)]
+    starts = np.flatnonzero(np.diff(np.r_[0, below.astype(int)]) == 1)
+    r['below_reach_at'] = [[round(float(seg[i, 0]), 2), round(float(seg[i, 1]), 2), round(float(cs[i]), 3)]
+                           for i in starts[:6]]
+    r['time_below_reach_s'] = round(float(below.sum()) * (float(np.median(np.diff(sel_t))) if len(sel_t) > 1 else 0.0), 2)
+    gates = []
+    for k in real:
+        line = opening_line(course.checkpoints[k - 1].center, occ)
+        if line is None:
+            gates.append({'cp': k, 'crossed': False, 'why': 'no opening found'})
+            continue
+        ok, lat, cl = cross_opening(sel, line, clear, a.reach)
+        gates.append({'cp': k, 'crossed': ok, 'width_m': round(float(np.linalg.norm(line[1] - line[0])), 2),
+                      'lateral_m': lat, 'clear_m': cl})
+    r['openings'] = gates
+    r['real_openings'] = f"{sum(g['crossed'] for g in gates)}/{len(gates)}"
+    tc = r.get('course_time_node_s') or r.get('course_time_s')
+    r['clean'] = bool(r['result'] == 'done' and r['touches_strict'] == 0 and all(g['crossed'] for g in gates)
+                      and r['in_pad'] and tc is not None and tc <= a.max_course_s)
     print(json.dumps(r))
     if a.append:
         cols = ['result', 'mission_time_s', 'course_time_s', 'plan_time_s', 'max_xt_m', 'rms_xt_m',

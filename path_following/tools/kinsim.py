@@ -68,6 +68,8 @@ class SimParams:
     radius_m: float = 0.20            # body + props half-span for touch counting
     seed: int = 0
     t_max: float = 120.0
+    clearance_slow_m: float = 0.0     # node's clearance slow-down (0 = off), as mission_tracker
+    clearance_stop_m: float = 0.0
 
 
 class Px4Model:
@@ -223,7 +225,8 @@ def run(course, traj, tracker_params=None, mission_params=None, sim=None, cleara
             out = mission.step(ctrl_dt, Inputs(
                 now=t, offboard=offboard, armed=px4.armed, landed=px4.landed,
                 pos=pos, vel=vel, yaw=yaw, pose_age=age,
-                clearance_scale=1.0))
+                clearance_scale=(float(np.squeeze(clearance.speed_scale(pos[None], sp.clearance_slow_m, sp.clearance_stop_m)))
+                                 if sp.clearance_slow_m > 0.0 and pos is not None else 1.0)))
             if t_map_odom_est is not None:
                 v_odom = t_map_odom_est.inverse().apply_vec(out.v)
             else:
