@@ -56,6 +56,7 @@ fly)
     *) echo "mode must be gt or loc"; exit 1 ;;
   esac
   out="$RUNS/$name"
+  if [ -e "$REPO/$out" ]; then echo "run $name exists ($out): pick a new name"; exit 1; fi
   mkdir -p "$REPO/$out"
   start_loc "$@"
   sleep 6
