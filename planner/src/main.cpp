@@ -242,6 +242,7 @@ int main(int argc, char **argv)
     const std::vector<double> mapBound = nums("MapBound", 6);
     const double voxelWidth = num("VoxelWidth");
     const double dilateRadius = num("DilateRadius");
+    const std::string dilateShape = (cfg.count("DilateShape") && !cfg["DilateShape"].empty()) ? str("DilateShape") : "cube";
 
     const Vector3d startPos = vec3("StartPos");
     const double startHeading = num("StartHeadingDeg") * M_PI / 180.0;
@@ -304,7 +305,43 @@ int main(int argc, char **argv)
         }
         voxelMap.setOccupied(Vector3d(fdata[cur + 0], fdata[cur + 1], fdata[cur + 2]));
     }
-    voxelMap.dilate(std::ceil(dilateRadius / voxelMap.getScale()));
+    // DilateShape (ours, optional): cube (default, upstream: the 26-neighbour dilation grown
+    // ceil(R/voxel) times, i.e. a box, which makes walls at an angle to the grid up to sqrt(2)x fatter)
+    // or sphere (Euclidean: every voxel within R of an occupied voxel centre; the last voxel layer is
+    // still grown by upstream's dilate(1) so the corridor generator gets its surface list).
+    const int dilateVox = (int)std::ceil(dilateRadius / voxelMap.getScale());
+    if (dilateShape == "sphere" && dilateVox > 1)
+    {
+        const Eigen::Vector3i size = voxelMap.getSize();
+        const std::vector<uint8_t> &vox = voxelMap.getVoxels();
+        std::vector<Eigen::Vector3i> occ;
+        for (int x = 0; x < size(0); x++)
+            for (int y = 0; y < size(1); y++)
+                for (int z = 0; z < size(2); z++)
+                    if (vox[x + y * size(0) + z * size(0) * size(1)] == 1)
+                        occ.emplace_back(x, y, z);
+        // sphere radius in voxels, leaving one layer for dilate(1); R/voxel - 1 rounded to the nearest
+        const double rs = dilateRadius / voxelMap.getScale() - 1.0;
+        const int ri = (int)std::ceil(rs);
+        std::vector<Eigen::Vector3i> ball;
+        for (int dx = -ri; dx <= ri; dx++)
+            for (int dy = -ri; dy <= ri; dy++)
+                for (int dz = -ri; dz <= ri; dz++)
+                    if (dx * dx + dy * dy + dz * dz <= rs * rs + 1e-9)
+                        ball.emplace_back(dx, dy, dz);
+        for (const Eigen::Vector3i &c : occ)
+            for (const Eigen::Vector3i &d : ball)
+                voxelMap.setOccupied(Eigen::Vector3i(c + d));
+        voxelMap.dilate(1);
+    }
+    else if (dilateShape == "cube" || dilateShape == "sphere")
+    {
+        voxelMap.dilate(dilateVox);
+    }
+    else
+    {
+        fail("DilateShape must be cube or sphere, not '" + dilateShape + "'");
+    }
 
     // --- Waypoints: hover above the pad, checkpoint centers, goal ---
     std::vector<Vector3d> wps{startPos + Vector3d(0.0, 0.0, hoverHeight)};

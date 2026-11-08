@@ -302,6 +302,47 @@ def course_v3():
     check(codes[-1] == 0, "course_v3: plans within 3 attempts (exits %s)" % codes)
 
 
+
+def dilate_shape():
+    print("\n== 7. DilateShape: sphere keeps the Gate B chicane channel open at R 0.35, cube closes it ==")
+    src = os.path.join(ROOT, "config", "course_v3_gateb.yaml")
+    lines = []
+    for line in open(src):
+        key = line.split(":", 1)[0].strip()
+        if key == "MapFile":
+            line = "MapFile: %s\n" % os.path.join(ROOT, "maps", "course_v3.bin")
+        elif key == "OutDir":
+            line = "OutDir: %s\n" % os.path.join(WORK, "gateb_out")
+        elif key == "DilateRadius":
+            line = "DilateRadius: 0.35\n"
+        lines.append(line)
+    res = {}
+    for shape in ("cube", "sphere"):
+        cfg = os.path.join(WORK, "gateb_%s.yaml" % shape)
+        with open(cfg, "w") as f:
+            f.writelines(lines + ["DilateShape: %s\n" % shape])
+        codes, logs = [], []
+        for _ in range(3):
+            code, log = run([PLANNER, cfg, "--out", os.path.join(WORK, "gateb_" + shape)])
+            codes.append(code)
+            logs.append(log)
+            if code == 0:
+                break
+        res[shape] = (codes, logs[-1])
+    codes, log = res["cube"]
+    check(codes[-1] != 0 and "inside an obstacle" in log,
+          "cube R 0.35: chicane via point rejected (exits %s)" % codes)
+    codes, log = res["sphere"]
+    print("\n".join("    " + l for l in log.splitlines() if "total" in l))
+    check(all(c >= 0 and c != 139 for c in codes), "sphere R 0.35: no attempt crashed (exits %s)" % codes)
+    check(codes[-1] == 0, "sphere R 0.35: Gate B plans within 3 attempts (exits %s)" % codes)
+    cfg = os.path.join(WORK, "gateb_bad.yaml")
+    with open(cfg, "w") as f:
+        f.writelines(lines + ["DilateShape: ball\n"])
+    code, log = run([PLANNER, cfg, "--out", os.path.join(WORK, "gateb_bad")])
+    check(code != 0 and "DilateShape must be" in log, "unknown DilateShape is rejected")
+
+
 if __name__ == "__main__":
     for exe in (PLANNER, UPSTREAM):
         if not os.path.exists(exe):
@@ -310,5 +351,6 @@ if __name__ == "__main__":
     checkpoints()
     straight_legs()
     course_v3()
+    dilate_shape()
     print("\n%s: %d failure(s)" % ("FAILED" if failures else "ALL PASSED", len(failures)))
     sys.exit(1 if failures else 0)

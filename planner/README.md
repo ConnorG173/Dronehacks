@@ -78,6 +78,7 @@ upstream names have upstream `global_planning.yaml` defaults.
 | `MapFile` | occupied-point map (format below) |
 | `MapBound` | `xmin xmax ymin ymax zmin zmax` of the voxel grid; outside counts as occupied |
 | `VoxelWidth`, `DilateRadius` | voxel size and obstacle inflation (m); upstream 0.25 / 0.5 |
+| `DilateShape` | optional, ours: `cube` (default, upstream: 26-neighbour dilation grown `ceil(R/voxel)` times, a box that inflates walls at an angle to the grid up to √2×) or `sphere` (every voxel within `DilateRadius` of an occupied voxel centre, then one upstream layer for the surface list). `sphere` keeps the Gate B chicane channel open at R 0.35 where `cube` closes it (test 7) |
 | `StartPos` | takeoff pad on the ground, map frame = PX4 local origin |
 | `StartHeadingDeg` | vehicle heading at start, CCW from map +x = direction of PX4 local +x |
 | `HoverHeight` | the trajectory starts at rest at `StartPos + (0, 0, HoverHeight)` |
