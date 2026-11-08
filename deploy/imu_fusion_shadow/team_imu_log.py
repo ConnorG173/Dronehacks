@@ -184,8 +184,15 @@ def main():
     ref = {}
     t_log = t_print = t_start = time.time()
     rate = {k: 0 for k in EST}
+    bad_msgs = 0
     while rclpy.ok():
-        rclpy.spin_once(n, timeout_sec=0.01)
+        try:
+            rclpy.spin_once(n, timeout_sec=0.01)
+        except RuntimeError as e:          # one undecodable message must not end the recording
+            bad_msgs += 1
+            if bad_msgs <= 5 or bad_msgs % 100 == 0:
+                print(f'{time.strftime("%T")} skipped undecodable message #{bad_msgs}: {e}', flush=True)
+            continue
         now = time.time()
         stop = False
         if a.guard and now - t_start > 5.0:     # 5 s grace for the first telemetry after start-up
