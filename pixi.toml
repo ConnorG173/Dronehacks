@@ -11,6 +11,7 @@ scipy = "*"
 trimesh = "*"
 cadquery = "*"          # STEP import (OCP kernel)
 pytest = "*"
+pillow = "*"            # dashboard demo: rendered depth frames
 cmake = ">=3.10"
 ninja = "*"
 cxx-compiler = "*"
