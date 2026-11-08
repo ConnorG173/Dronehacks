@@ -10,11 +10,11 @@ PRESET="${1:?hover|course}"; BH="${2:?base_height_on_pad_m (measured)}"; ROUTE="
 if [[ "$ROUTE" == gateb ]]; then RARG=""; else RARG="path_file:=$KIT_CT/repo/path_following/routes/$ROUTE.bin"; fi
 if [[ -n "$RARG" && "$PRESET" == first_leg ]]; then echo "first_leg needs route gateb (it re-plans on the old CAD)"; exit 1; fi
 case "$PRESET" in hover|first_leg|course) ;; *) echo "preset must be hover, first_leg or course"; exit 1;; esac
-if ct "$ENV_CT; ros2 node list 2>/dev/null | grep -q mission_tracker"; then echo "mission_tracker already running: stop.sh first"; exit 1; fi
+if ct "$ENV_CT; ros2 node list --no-daemon --spin-time 5 2>/dev/null | grep -q mission_tracker"; then echo "mission_tracker already running: stop.sh first"; exit 1; fi
 POSE=$(px4_pose_topic)
 echo "pose source = what PX4 fuses: $POSE"
 if [[ "$POSE" == /team_heading/odometry ]]; then
-  ct "$ENV_CT; timeout 4 ros2 topic echo --once /team_heading/status 2>/dev/null" | grep -q '"calibrated": true' \
+  ct "$ENV_CT; timeout 10 ros2 topic echo --once --no-daemon /team_heading/status 2>/dev/null" | grep -q '"calibrated": true' \
     || echo "WARNING: heading fix not calibrated yet. Run calibrate.sh (drone still on the pad) before the pilot arms."
 fi
 T=$(date +%Y%m%d_%H%M%S)

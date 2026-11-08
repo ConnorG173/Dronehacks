@@ -8,7 +8,7 @@ ct() { docker exec "$CT" bash -lc "$1"; }
 # The pose PX4 fuses = the px4_odom_bridge input (levelled VIO, or the gyro heading fix when its marker is set).
 # Our tracker must steer on exactly that topic, or its velocity commands rotate against PX4's frame.
 px4_pose_topic() {
-  local t; t=$(ct "$ENV_CT; timeout 8 ros2 param get /px4_odom_bridge input_topic 2>/dev/null" | sed -n 's/^String value is: //p')
+  local t; t=$(ct "$ENV_CT; timeout 20 ros2 param get --no-daemon /px4_odom_bridge input_topic 2>/dev/null" | sed -n 's/^String value is: //p')
   if [[ -z "$t" ]]; then
     if ct "test -e /root/team_ws/claude/mavlink_usb/heading_fix_enabled"; then t=/team_heading/odometry; else t=/claude/vio_leveled/odometry; fi
     echo "(bridge param unreadable; marker says $t)" >&2
