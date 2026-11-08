@@ -256,7 +256,9 @@ class WallMatcher(Node):
         if t == self.last_stamp:
             return
         self.last_stamp = t
-        now = self.get_clock().now().nanoseconds * 1e-9
+        # Age against the newest VIO stamp: the same time domain as the images on the drone and in
+        # sim (sim time), whatever this node's clock is.
+        now = self.odom.d[-1][0] if self.odom.d else t
         st["image_age_s"] = round(now - t, 3)
         if now - t > float(self.g("max_image_age_s")):
             st["reason"] = "image too old (behind)"
