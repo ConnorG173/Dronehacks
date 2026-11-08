@@ -1,0 +1,5 @@
+Current height/point-control update and evidence:
+/home/dronehacks/team_ws/claude/dash_update_20261108T002109Z/RESULT.txt
+
+Active shared height limits: flight_limits.json (0.3–2.0 m).
+The return-telemetry dropout and 50% motor cap remain unresolved.

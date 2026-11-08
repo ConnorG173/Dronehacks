@@ -1,0 +1,70 @@
+Persistent USB startup — verified 2026-11-08 UTC
+
+The user rebooted the Jetson. Its enabled skybeta-stack.service started the
+camera/cuVSLAM, leveller, bridge, flight interface, dashboard and UART agent,
+but the saved launchers still selected the old DDS flight-input route.
+While the host was publishing vision on /fmu/in/vehicle_visual_odometry,
+PX4's console reported that vehicle_visual_odometry was never published.
+PX4 had no EV position/yaw fusion and local position was invalid. That is
+specific evidence for this boot; it does not identify the cause of all earlier
+in-flight failures.
+
+Fixed and saved:
+- startup/run_bridge.sh and startup/run_competitor.sh now select the USB launch
+  files whenever mavlink_usb/enabled exists. The marker is enabled.
+- The existing enabled systemd boot service invokes these mounted wrappers.
+  Both wrappers were executed successfully to restore the live processes.
+- Camera/cuVSLAM -> leveller -> odometry bridge -> private ROS topics -> USB
+  MAVLink -> PX4. Offboard setpoints also use USB MAVLink.
+- UART DDS stays active for return telemetry and existing operator commands.
+- One adapter owns PX4 USB and also forwards QGC traffic. It uses the stable
+  USB by-id path, retries USB opening, and its socket can bind before Tailscale
+  has an address. Incoming QGC traffic remains restricted to the configured
+  laptop IP. The dashboard retains its existing startup retry.
+- The existing one-shot Offboard selector follows the private control topic.
+  It requires fresh disarmed/landed and valid-position telemetry. It never
+  arms or takes off. On this restart PX4 was already in Offboard, so the helper
+  logged confirmation without sending a mode request.
+- Firmware, flight parameters and motor limits were not changed.
+
+Verified after restoring USB:
+- Authenticated dashboard page returns HTTP 200 and exactly matches dash.html.
+  Its live state shows PX4 connected, disarmed, landed, fresh tracked poses,
+  valid local position and EV position/yaw fusion. No competing dashboard
+  setpoint publisher was found. The page's software readiness does not verify
+  a motor cap or flight performance.
+- PX4's incoming vision topic now updates; eight measured samples were
+  62.684–65.277 ms old at receipt. Incoming control and position
+  setpoint topics were independently checked on PX4.
+- Settled capture: 94.664 seconds, excluding the first 15 seconds
+  after USB vision began (USB time-sync exchange was warmed up beforehand).
+- Vision writes 30.001 Hz; control setpoint writes 10.000 Hz.
+  Maximum host write intervals: 81.655 ms vision,
+  121.970 ms control.
+- Vision position/yaw fusion stayed on; compass-heading fusion stayed off.
+  Position reset counter stayed 125; heading/quaternion counters stayed 91.
+  Local position remained valid; Offboard-loss remained false.
+- No old DDS vision/control/setpoint input publications in that window.
+  ROS endpoint inventory confirms only the intended private publishers.
+- One USB owner, one connection open, no disconnect or logging errors.
+  PX4 reported zero lost packets for adapter system 12/component 197 in the
+  console check. Host write logs alone are not continuous PX4 receipt proof.
+- Eight adapter tests pass; startup shell syntax and both launch descriptions
+  checked. Tests include partial writes, stale-data handling, time-sync and
+  continued delivery after a logging failure.
+
+Scope and remaining limits:
+The saved boot launchers were exercised. No additional full Jetson reboot was
+performed after this change. The recorder is stopped; normal services and the
+adapter's completed-write logging remain running. This is a ground check, not
+hover validation. The requested 50% per-motor cap is still NOT enforced.
+
+Rollback for a future boot only:
+Rename/remove /home/dronehacks/team_ws/claude/mavlink_usb/enabled. Both wrappers
+then select the retained original startup launch files. This does not switch
+running processes; do not restart flight processes while armed or airborne.
+
+Evidence: bootcheck_20261108T000146Z/ contains the stopped recording and summary,
+launch-changes.jsonl, dds-input-results.json, usb-check-results.json,
+final-endpoints.json, dashboard-authenticated.json, final-runtime-status.json,
+final-live-state.json, settled-analysis-final.json and analysis-window.json.

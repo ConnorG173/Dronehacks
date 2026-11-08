@@ -1,0 +1,58 @@
+Course pacing update — 2026-11-08 UTC
+
+ACTIVE: dashboard-only reload while fresh USB telemetry and dashboard state
+confirmed disarmed, landed and idle. Dashboard PID535 ->1613; flight interface533
+and USB adapter537 remained running. Readback: idle, disarmed, landed, ready,
+position age0.01s, interface age0.16s, all1394 route points present, home unset.
+Source hashes match the tested candidate. This code is also used on next boot.
+
+The requested faster following is implemented by removing unnecessary course
+stop/turn cycles. The horizontal limit stays1.0m/s; raising it to1.2m/s alone
+barely improved the synthetic route because repeated alignment stops dominated.
+
+Changes:
+- A changing course tangent no longer reapplies the5-degree entry threshold to
+  an already aligned follower. It uses the existing10-degree exit threshold for
+  both the current commanded heading and measured-heading continuation check.
+  Initial alignment/re-entry still requires5degrees, low measured speed and
+  settling. Larger changes still stop translation before realigning.
+- When tracking lag pauses the course clock, retain its alignment state and
+  finish only an already-issued bounded yaw turn. Resuming translation again
+  checks measured heading. A pacing pause no longer masquerades as manual Hold.
+  Vertical/stationary segments and explicit Hold retain their prior behavior.
+
+Unchanged:1m/s XY and0.3m/s vertical target ramps,60deg/s yaw rate,
+120deg/s^2 commanded turn acceleration,0.30m horizontal command lead,
+0.20m3D course-clock lag gate,0.5m course-error trip, heartbeat/telemetry gates,
+reference checks, stop/cancel behavior and selected course radius. No PX4
+parameters, mode, arming or flight movement commands were changed/sent.
+The original route is executed; depth-adjusted paths remain preview-only.
+
+Validation:
+-21 pure heading/course tests, including new hysteresis, tracking-pause/resume,
+  measured/commanded heading disagreement, and full real-route regression.
+-26 path-heading/course-state/compact-state tests passed.
+-35 API/readiness/motion/yaw-wire tests passed using isolated ROS domain221;
+  publishers were mocked/intercepted, with no requests to the real flight API.
+-Eight synthetic full-route comparisons with position response time constants
+  0/0.1/0.3/0.5s and ideal measured yaw. Before:127.7/129.0/135.3/149.3s.
+  After:86.5/87.3/89.8/93.2s. Final candidate respected all tested rate, lead and
+  moving-heading bounds. These are model results, not actual flight times.
+-No hardware flight test was performed. Sharp corners and tracking lag may
+  still require pauses; the change does not promise continuous flight everywhere.
+
+Operator next step: refresh, Take control, and Set home / course start on the
+launch mark again. Reload intentionally cleared the reference. The saved route
+remains loaded. Prepare/arm/start actions remain operator-controlled.
+
+Candidate and reproducible benchmark:
+/home/dronehacks/team_ws/claude/course_speed_candidate_20261108T025236Z/
+Deployment backup, guards, source hashes and live verification:
+/home/dronehacks/team_ws/claude/course_speed_deploy_20261108T025546Z/
+
+Superseded for course steering/speed by COURSE-CONTINUOUS-STATUS.txt:
+continuous steering, course 1.2 m/s, yaw 90 degrees/s, active 2026-11-08 UTC.
+
+Superseded by the continuous steering update: COURSE-CONTINUOUS-STATUS.txt.
+Course speed is now 1.2 m/s, yaw limit 90 deg/s, with continuous curve tracking.
+The new settings were verified after reboot.

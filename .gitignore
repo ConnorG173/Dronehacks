@@ -8,3 +8,9 @@ __pycache__/
 localizer/build/
 localizer/install/
 localizer/log/
+
+# pixi / local environments and generated files
+.pixi/
+.venv-planner/
+tools/course_*.json
+flight/dash/dash_token.txt

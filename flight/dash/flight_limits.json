@@ -1,0 +1,5 @@
+{
+  "min_altitude_m": 0.3,
+  "max_altitude_m": 2.5,
+  "max_speed_mps": 1.0
+}

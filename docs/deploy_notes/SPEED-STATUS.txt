@@ -1,0 +1,36 @@
+Horizontal speed update — 2026-11-08 UTC
+
+Applied increase: dashboard horizontal position-target ramp 0.3 -> 1.0 m/s,
+as requested by the user. This supersedes the staged 0.5 m/s setting.
+Shared flight_limits.json also supplies the interface velocity-command cap 1.0.
+The interface cap applies to velocity commands; the dashboard ramp is the
+relevant limit for Go-to-point position commands. Vertical ramp remains 0.3 m/s
+and landing descent 0.2 m/s. The fence and altitude limits are unchanged.
+
+The saved USB and fallback startup launches pass --horizontal-speed from the
+same shared configuration. The change is active and saved for the next boot.
+26 dashboard Python tests and 5 JavaScript tests passed, including diagonal
+horizontal-speed magnitude and unchanged vertical ramp.
+
+The dashboard launch was restarted after fresh USB and DDS telemetry confirmed
+disarmed and landed. Readback confirmed dashboard v_xy=1.0, v_z=0.3 and interface
+max_speed_mps=1.0; PX4 remained disarmed, landed, Offboard and connected. Dashboard
+readiness was true, with no blockers and position age 0.01 s. No arm or movement
+command was sent for validation. Evidence directory is identified by
+../mavlink_usb/active_speed.txt (dashboard-readback.json and launch-changes.jsonl).
+
+Read-only PX4 parameter verification: MPC_XY_VEL_MAX=12 m/s,
+MPC_XY_CRUISE=5 m/s, MPC_Z_VEL_MAX_UP=3 m/s. These parameters were not changed.
+The horizontal target ramp is not a motor-output cap or a guarantee that actual
+velocity never overshoots. The requested 50% per-motor cap remains unenforced.
+
+Course playback pacing update,2026-11-08 02:55:46 UTC:
+The peak stays1.0m/s. Unnecessary curve alignment and tracking-pause resets
+were removed; see COURSE-PACING-STATUS.txt for tests and deployment evidence.
+
+Superseded for course steering/speed by COURSE-CONTINUOUS-STATUS.txt:
+continuous steering, course 1.2 m/s, yaw 90 degrees/s, active 2026-11-08 UTC.
+
+Superseded by the continuous steering update: COURSE-CONTINUOUS-STATUS.txt.
+Course speed is now 1.2 m/s, yaw limit 90 deg/s, with continuous curve tracking.
+The new settings were verified after reboot.

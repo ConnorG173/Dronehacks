@@ -1,0 +1,73 @@
+DASHBOARD UPDATE, 2026-11-08 UTC: both startup routes now read
+../dash/flight_limits.json and apply the same 0.3–2.0 m altitude band to the
+flight interface and dashboard. Go to point is installed and retained at boot.
+Details/tests/current limitations: ../dash/UPDATE-STATUS.txt.
+
+UPDATE 2026-11-08 UTC: persistent USB MAVLink route
+
+The boot wrappers now select ../mavlink_usb/bridge.launch.py and
+../mavlink_usb/dashboard.launch.py when ../mavlink_usb/enabled exists.
+That marker is enabled. Vision and Offboard setpoints use USB MAVLink;
+UART DDS remains for PX4 return telemetry and existing operator commands.
+The single USB owner also forwards QGC telemetry. It identifies the PX4 by
+its USB by-id path and can start before the Tailscale address is available.
+The existing startup Offboard selector remains guarded by fresh disarmed,
+landed, valid-position telemetry. It never arms or takes off.
+
+Rollback for the NEXT start: rename/remove only ../mavlink_usb/enabled.
+Both wrappers then select the original startup/ launch files. This does not
+switch running processes. Do not restart running flight processes in flight.
+No firmware, EKF, thrust, or motor parameters were changed by this update.
+The requested 50% motor cap remains unenforced.
+Verification and current status: ../mavlink_usb/BOOT-STATUS.txt.
+
+The earlier installation record below is historical:
+
+Drone 12 dashboard startup, installed 2026-11-07.
+
+Existing enabled skybeta-stack.service still owns the container.
+/home/dronehacks/skybeta/host/run.sh now bind-mounts startup/run_bridge.sh
+and startup/run_competitor.sh over the image's launcher scripts. This replaces
+the example mission; COMPETITOR_PKG in /etc/skybeta/drone.env is not used by
+this drone's replacement launcher. No image rebuild is required.
+
+On the NEXT container start:
+- The existing agent and OAK/cuVSLAM start normally.
+- The bridge pane starts the VIO leveller and the sole PX4 odometry bridge,
+  subscribed to /claude/vio_leveled/odometry with the existing FRD convention.
+- The competitor pane starts our flight interface, dashboard, USB MAVLink proxy,
+  and a one-shot Offboard mode request. No example mission runs.
+- The flight interface imports the previously tested height_stage package,
+  targets PX4 system 12, uses PX4 height, max altitude 1.5 m, max speed 0.3 m/s.
+- Startup requests Offboard once only while fresh telemetry says disarmed,
+  landed, local position/altitude valid, and the Offboard heartbeat available.
+  It never arms, takes off, or retries after a rejected mode request.
+- Dashboard and proxy retry startup if Tailscale is not ready yet. Proxy sends
+  to laptop 100.107.69.115:14550. The host launcher retires the old host proxy
+  only after verifying both its working directory and command line.
+- The proxy will then be owned by the ROS launch process inside the container;
+  the old host qgc_start.sh/qgc_stop.sh PID file does not manage that instance.
+- The viewer and experimental IMU/Basalt nodes do not start.
+
+No stack restart or drone reboot was performed during installation, per user.
+Current running bridge still reads raw visual SLAM: the saved levelled bridge
+configuration takes effect on the next container start. Current dashboard and
+host MAVLink proxy were left running. The example mission was stopped and our
+flight interface was started before the no-restart instruction. PX4 accepted
+an Offboard mode request while disarmed. No arm command was sent.
+
+Validation: shell syntax; launch description parsing without launching;
+startup eligibility unit tests; isolated ROS mode-request test; flight-interface
+unit tests. A full startup/reboot test has deliberately NOT been performed.
+No 50-percent motor cap has been applied. VIO position/heading resets remain
+unresolved; Offboard mode alone is not evidence of readiness to fly.
+
+Rollback for a FUTURE container start (does not restart anything):
+cp /home/dronehacks/team_ws/claude/startup/host_run.original.sh /home/dronehacks/skybeta/host/run.sh
+The original launcher restores the organizer example mission and raw bridge.
+
+UPDATE 2026-11-08 03:30 PST: cuVSLAM cameras 640x400 @ 60 fps (was 1024x640 @ 30).
+host/run.sh bind-mounts startup/oakd_vslam.yaml and startup/oakd_vslam.launch.py over the
+image's oakd_vslam_bringup config/launch (IMAGE_WIDTH/HEIGHT must match the yaml).
+depth_overlay/worker.py now recalibrates when the camera size changes and always rectifies
+to 512 px wide. Rollback: restore startup/host_run.before_vslam60.sh to host/run.sh.

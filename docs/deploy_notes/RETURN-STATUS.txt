@@ -1,0 +1,55 @@
+USB return telemetry / dashboard change — 2026-11-08 UTC
+
+The dashboard and FlightInterface now use USB MAVLink for PX4 local position,
+heading, mode, arming, landed state, battery and command acknowledgments.
+Explicit dashboard arm/disarm requests also use that single USB owner. Vision
+and Offboard setpoints retain the already-working USB path. Native PX4 flight
+parameters, estimator checks and motor limits were not changed.
+
+At the user's explicit request, dashboard EKF fusion flags and the reset-counter
+stability wait were removed. The UI no longer displays those absent checks.
+Fresh finite position, flight status, landed state, battery and VIO data remain
+required. Actual PX4 failsafe state, browser ownership/heartbeat, armed Offboard
+flight, the 1.5 m horizontal fence and 0.3–2.0 m height limits remain.
+The subsequent user-requested speed update raises horizontal target ramp and
+interface velocity cap to 1.0 m/s; vertical target ramp remains 0.3 m/s.
+It is active and saved for boot; see ../dash/SPEED-STATUS.txt for readback.
+Private px4_msgs containers carry only fields available from MAVLink; they are
+not copies of native uORB EKF health. Their finite-pose validity does not claim
+EKF health. No invented fusion or preflight flags are used.
+
+Return messages are source-checked (FC system12/component1), bounded and fresh.
+Streaming data is coalesced without timer replay. Repeated/nonincreasing source
+timestamps cannot refresh position. Queued return samples expire after250ms.
+Reconnect clears old samples/commands. Commands are explicit, restricted,
+expire after250ms, and are never automatically retried. Forced arming is rejected.
+
+Validation:
+- 58 Python tests and 5 JavaScript tests passed using synthetic data, isolated
+  ROS domain221 and virtual serial ports. No test flight commands went to PX4.
+- The dashboard launch was replaced only after fresh disarmed/landed checks.
+- User then armed and flew. Real Go-to-point requests were accepted at
+  00:42:21 and00:42:26 UTC; later requests were also accepted.
+- In the first85s settled comparison, USB position's maximum receive gap was
+  94.17ms, landed231.07ms and1Hz heartbeat1020.38ms. The old UART DDS return
+  position/status feed had a49.340s interruption. Saved dashboard snapshots
+  during that interruption show engaged, fresh USB state and no blockers.
+- PX4 subsequently reported AUTO_LAND and the dashboard stopped motion as
+  intended, then the user reset home, prepared another hover and armed again.
+  The cause of that native mode change is not established by this observation.
+- These observations verify delivery and accepted motion requests; they are
+  not a measured navigation-accuracy qualification or a motor-output cap.
+
+Boot: skybeta-stack.service remains enabled. Existing enabled-marker launchers
+select the updated USB launch. A guarded one-shot startup mode selector uses
+USB state, never arms, and makes no automatic retry.
+
+The leveller also now consumes USB attitude/gyro. Its restart was initially
+blocked while armed and was completed once USB reported disarmed and landed.
+The dashboard, FlightInterface and leveller therefore no longer require UART
+return telemetry. The old UART agent remains available for diagnostics.
+
+Evidence: return_fix_20261108T003409Z/ (raw recording, USB comparison, runtime
+states, endpoint audit and flight-gap-summary-interim.json).
+Backups: return_fix_backup_20261108/.
+The previously requested 50% per-motor cap remains unenforced.

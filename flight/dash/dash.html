@@ -1,0 +1,1553 @@
+<meta charset="utf-8">
+<title>skybeta-12 control</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Flight-line instrument panel. One signature: the status strip. Everything else is quiet.
+   Dark on purpose (read next to a flying drone); colour carries state, never decoration. */
+:root{
+  --bg:#0b0f12;--surface:#121820;--raised:#18212b;--border:#253240;
+  --ink:#e9eef2;--muted:#a3b0bb;--faint:#6f7d89;
+  --ok:#3fb27f;--ok-ink:#04140c;--warn:#e0a43a;--warn-ink:#1c1200;--bad:#ef5350;--info:#5fb3e8;
+  --route:#d2a8ff;--depth:#45d4c4;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  --sans:"IBM Plex Sans","Segoe UI",Helvetica,Arial,sans-serif;
+  color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 var(--sans)}
+[hidden]{display:none!important}
+
+/* --- status strip: the one loud thing --------------------------------------------- */
+.strip{position:sticky;top:0;z-index:2;display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;
+  padding:10px max(16px,env(safe-area-inset-right,0px)) 10px max(16px,env(safe-area-inset-left,0px));
+  background:var(--surface);border-bottom:1px solid var(--border)}
+.strip h1{margin:0;font:600 16px var(--mono);letter-spacing:.01em}
+#mode{font:600 15px var(--mono);padding:5px 12px;border-radius:6px;letter-spacing:.04em;text-transform:uppercase}
+.m-idle{background:var(--raised);color:var(--ink)}.m-engaged{background:var(--ok);color:var(--ok-ink)}
+.m-landing{background:var(--warn);color:var(--warn-ink)}.m-failsafe{background:var(--bad);color:#fff}.m-pilot{background:var(--info);color:#03111d}
+#reason{color:var(--muted);font-size:14px;flex:1 1 200px}
+.badge{font:600 12px var(--mono);padding:3px 8px;border-radius:5px;border:1px solid var(--border)}
+.dry{color:var(--warn);border-color:var(--warn)}.live{color:#fff;background:var(--bad);border-color:var(--bad)}
+.tabs{display:flex;gap:2px;padding:3px;background:var(--bg);border:1px solid var(--border);border-radius:8px}
+.tabs button{border:0;background:transparent;color:var(--muted);padding:7px 18px;border-radius:6px;font:600 14px var(--sans)}
+.tabs button[aria-selected="true"]{background:var(--raised);color:var(--ink)}
+#linklost{display:none;margin:12px 16px 0;background:var(--bad);color:#fff;font:600 16px var(--mono);padding:10px 14px;border-radius:6px}
+#warn{display:none;margin:12px 16px 0;background:#3a2a00;color:#ffd27a;padding:9px 14px;border-radius:6px}
+
+/* --- layout: work on the left, the map always on the right -------------------------- */
+.layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,430px);gap:14px;align-items:start;
+  padding:14px max(16px,env(safe-area-inset-right,0px)) 32px max(16px,env(safe-area-inset-left,0px))}
+.col{display:flex;flex-direction:column;gap:14px;min-width:0}
+.side{position:sticky;top:64px}
+@media(max-width:900px){.layout{grid-template-columns:1fr}.side{position:static}}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px}
+.card h2{margin:0 0 10px;font:600 15px var(--sans)}
+.card h2 .small{font-weight:400;margin-left:6px}
+.lede{margin:0 0 12px;color:var(--muted)}
+.small{color:var(--muted);font-size:13px}
+p{margin:8px 0}
+
+/* --- start card: first thing on Fly ------------------------------------------------- */
+.start{border-color:#2f4a3c}
+.start-row{display:flex;flex-wrap:wrap;gap:12px;align-items:end}
+.start-row label{display:flex;flex-direction:column;gap:5px;font-size:13px;color:var(--muted)}
+#flight_launch{flex:1 1 220px;min-height:52px;font-size:17px;background:var(--ok);border-color:var(--ok);color:var(--ok-ink)}
+#flight_launch:disabled{background:var(--raised);border-color:var(--border);color:var(--muted)}
+#flight_launch_hop{flex:1 1 220px;min-height:52px;font-size:17px;background:var(--ok);border-color:var(--ok);color:var(--ok-ink)}
+#flight_launch_hop:disabled{background:var(--raised);border-color:var(--border);color:var(--muted)}
+#flight_status{margin:12px 0 0;font-size:15px;min-height:22px}
+#flight_stops{display:flex;gap:8px;margin-top:12px}
+#flight_stops button{flex:1;min-height:46px}
+#flight_kill{display:block;width:100%;margin-top:12px;padding:11px;font-size:14px;background:transparent;border-color:#7a2a28;color:#ffb3ae}
+#flight_kill:disabled{display:none}
+#toast{min-height:0;color:var(--info);font:13px var(--mono);margin-top:6px}
+
+/* --- readouts ------------------------------------------------------------------------ */
+.readouts{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:4px 24px}
+.readouts h3{margin:0 0 6px;font:600 13px var(--sans);color:var(--muted)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font:13px var(--mono);font-variant-numeric:tabular-nums}
+.kv b{font-weight:400;color:var(--muted)}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:middle}
+
+/* --- forms -------------------------------------------------------------------------- */
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.fields{display:flex;flex-wrap:wrap;gap:12px;align-items:end;margin:4px 0}
+.fields label,.point-fields label{display:flex;flex-direction:column;gap:5px;font-size:13px;color:var(--muted)}
+.point-fields{display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-top:10px}
+button{font:600 14px var(--sans);color:var(--ink);background:var(--raised);border:1px solid #34424f;border-radius:7px;padding:9px 14px;cursor:pointer;min-width:44px;min-height:40px}
+button:hover:not(:disabled){background:#202b37}
+button:focus-visible,select:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--info);outline-offset:2px}
+button:disabled{background:var(--surface);border-color:var(--border);color:var(--faint);cursor:not-allowed}
+button.go{background:#173826;border-color:var(--ok)}
+button.amber{background:#33270d;border-color:var(--warn)}
+button.kill{background:#5c1513;border-color:var(--bad);color:#fff}
+#release{background:var(--bad);border-color:var(--bad);color:#fff;font-size:16px;padding:12px 16px;width:100%}
+input{font:14px var(--mono);background:var(--bg);color:var(--ink);border:1px solid #34424f;border-radius:7px;padding:8px;width:84px}
+input[type=file]{width:auto;font:13px var(--sans);padding:6px}
+select{font:14px var(--sans);background:var(--bg);color:var(--ink);border:1px solid #34424f;border-radius:7px;padding:8px}
+select:disabled,input:disabled{color:var(--faint);cursor:not-allowed}
+textarea{width:100%;resize:vertical;min-height:96px;font:12px var(--mono);color:var(--ink);background:var(--bg);border:1px solid #34424f;border-radius:7px;padding:8px}
+details>summary{cursor:pointer;color:var(--muted);font-weight:600;padding:4px 0}
+details[open]>summary{margin-bottom:8px}
+.pad{display:grid;grid-template-columns:repeat(3,52px);grid-template-rows:repeat(3,44px);gap:6px}
+kbd{font:11px var(--mono);border:1px solid #34424f;border-bottom-width:2px;border-radius:3px;padding:0 4px;color:var(--muted)}
+#events{font:12px var(--mono);color:var(--muted);max-height:240px;overflow:auto;margin:0;padding-left:18px}
+
+/* --- map and depth ------------------------------------------------------------------ */
+canvas{width:100%;max-width:100%;aspect-ratio:1;background:#080b0e;border-radius:8px;display:block}
+#map{cursor:crosshair;touch-action:manipulation}
+#depth_view{width:100%;height:auto;display:block;border-radius:8px;background:#080b0e;min-height:60px}
+.depth-bar,.route-options{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;margin-top:10px;font-size:13px}
+.depth-bar label,.route-options label{display:inline-flex;align-items:center;gap:6px;cursor:pointer}
+.depth-bar input,.route-options input{width:auto;margin:0;accent-color:var(--depth)}
+.depth-key{color:#8ce7dc}.depth-key::before{content:'';display:inline-block;width:8px;height:8px;background:var(--depth);margin-right:6px}
+.depth-status{margin:6px 0}.depth-status.live{color:#8ce7dc}
+.route-original{color:#b4bec9}.route-adjusted{color:var(--route)}
+.route-original::before,.route-adjusted::before{content:'';display:inline-block;width:16px;border-top:2px dashed currentColor;margin-right:2px}
+.route-adjusted::before{border-top-style:solid}
+.route-adjusted.route-stale{color:var(--warn)}.route-adjusted.route-stale::before{border-top-style:dashed}
+.view3d{height:460px;border-radius:8px;background:#080b0e;overflow:hidden;display:flex;align-items:center;justify-content:center;touch-action:none}
+.view3d canvas{aspect-ratio:auto;border-radius:0}
+.play3d{display:flex;align-items:center;gap:10px;margin-top:10px}
+.play3d input[type=range]{flex:1;width:auto;padding:0;accent-color:var(--info)}
+.speedbar{display:inline-block;width:70px;height:8px;border-radius:4px;vertical-align:middle;background:linear-gradient(90deg,hsl(230,90%,52%),hsl(120,90%,45%),hsl(0,90%,52%))}
+.readout{font-size:1.2rem;font-weight:600;margin:.35rem 0;font-variant-numeric:tabular-nums}
+</style>
+
+<header class="strip">
+  <h1>skybeta-12</h1>
+  <span id="mode" class="m-idle">IDLE</span>
+  <span id="runmode" class="badge dry">DRY RUN</span>
+  <span id="reason"></span>
+  <nav class="tabs" role="tablist" aria-label="Dashboard">
+    <button id="tab_plan" role="tab" aria-selected="false" aria-controls="panel_plan">Plan</button>
+    <button id="tab_fly" role="tab" aria-selected="true" aria-controls="panel_fly">Fly</button>
+  </nav>
+</header>
+<div id="linklost">Connection lost. Use the controller if airborne.</div>
+<div id="warn"></div>
+
+<div class="layout">
+<div class="col">
+
+<!-- ============================== FLY ============================== -->
+<section id="panel_fly" role="tabpanel" aria-labelledby="tab_fly" class="col">
+  <div class="card start">
+    <h2>Start</h2>
+    <div class="start-row">
+      <label for="flight_mode">Flight<select id="flight_mode"><option value="course" selected>Fly course</option><option value="hover">Hover only</option></select></label>
+      <label id="flight_height_wrap" for="flight_height" hidden>Height (m)<input id="flight_height" type="number" step="0.1" min="0.3" max="2" value="0.5" required></label>
+      <button id="flight_launch" class="go" disabled>Connecting…</button>
+      <button id="flight_launch_hop" class="go" disabled hidden>Take off · course + return hop</button>
+    </div>
+    <p id="hop_line" class="small" hidden></p>
+    <p id="flight_status" role="status" aria-live="polite">Waiting for the aircraft.</p>
+    <p id="obstacle_mode" class="small" hidden>Depth display only · avoidance off</p>
+    <div id="toast" role="status" aria-live="polite"></div>
+    <div id="flight_stops" hidden><button id="flight_hold" class="amber" disabled>Hold</button><button id="flight_land" class="amber" disabled>Land</button></div>
+    <button id="flight_kill" class="kill" disabled>Emergency motor stop — aircraft will fall</button>
+  </div>
+
+  <div class="card">
+    <h2>Aircraft</h2>
+    <div class="readouts">
+      <div><h3>PX4 &amp; VIO</h3><div class="kv">
+        <b>px4 link</b><span id="px4">-</span>
+        <b>mode</b><span id="nav">-</span>
+        <b>armed</b><span id="armed">-</span>
+        <b>offboard</b><span id="off">-</span>
+        <b>landed</b><span id="landed">-</span>
+        <b>vio</b><span id="vio">-</span>
+        <b>heading fix</b><span id="hfix">-</span>
+        <b>controls ready</b><span id="ready">-</span>
+        <b>telemetry</b><span id="telemetry">-</span>
+        <b>battery</b><span id="batt">-</span>
+        <b>clamped</b><span id="clamped">-</span>
+      </div></div>
+      <div><h3 id="position_title">Position (PX4 local, ENU)</h3><div class="kv">
+        <b>x / y</b><span id="xy">-</span>
+        <b>height</b><span id="z">-</span>
+        <b>range height</b><span id="range_height">-</span>
+        <b>heading</b><span id="yaw">-</span>
+        <b>target height</b><span id="talt">-</span>
+        <b>setpoint out</b><span id="out">-</span>
+      </div></div>
+      <div><h3>Link</h3><div class="kv">
+        <b>control</b><span id="own">-</span>
+        <b>drone hears you</b><span id="hb">-</span>
+        <b>round trip</b><span id="rtt">-</span>
+        <b>failsafe after</b><span id="hbto">-</span>
+      </div>
+      <p class="small">Keep this tab in front: a hidden tab stops new commands.</p></div>
+    </div>
+  </div>
+
+  <div class="card" id="dry_card">
+    <h2>Dry run (carry it)</h2>
+    <p class="small">Disarmed only. The full autopilot (route, holes, centring, nudges, guard) runs on a copy and nothing is sent to PX4. Hold the drone at the course start, press Start, then carry it so the white dot follows the green dot.</p>
+    <div class="row"><button id="dry_start">Start dry run</button><button id="dry_stop">Stop</button></div>
+    <p id="dry_carry" class="readout" role="status" aria-live="polite">-</p>
+    <p id="dry_status" class="small">-</p>
+  </div>
+
+  <div class="card">
+    <h2>Control</h2>
+    <div class="row"><button id="claim">Take control</button><span class="small" id="ownhint"></span></div>
+    <label class="small"><input id="auto_course" type="checkbox" checked style="width:auto"> ARM takes off and flies the course</label>
+    <div class="row"><button id="arm" class="amber" disabled>ARM &amp; fly course</button><button id="disarm" class="kill" disabled>KILL MOTORS</button></div>
+    <span id="armstatus" class="small" role="status" aria-live="polite">PX4 decides whether to accept each request.</span>
+    <div class="row" style="margin-top:8px"><button id="course_start" class="go" disabled>Prepare course</button><button id="course_stop" class="amber" disabled>Stop course / Hold</button></div>
+    <p class="small">KILL MOTORS force-disarms at once, even in the air, and works without control.</p>
+    <details id="advanced">
+      <summary>Manual flying</summary>
+      <div class="row"><label for="alt" class="small">Hover height (m)</label><input id="alt" type="number" step="0.1" min="0.3" max="2" value="0.5" required>
+        <button id="engage" class="go">Prepare hover</button><button id="setalt">Set height</button></div>
+      <span id="height_limits" class="small">Reading height limits…</span>
+      <div class="row" style="margin-top:10px">
+        <div class="pad">
+          <span></span><button id="fwd" title="forward 0.25 m (W)">&#9650;</button><span></span>
+          <button id="left" title="left 0.25 m (A)">&#9664;</button><button id="hold" title="hold (H)">&#9632;</button><button id="right" title="right 0.25 m (D)">&#9654;</button>
+          <span></span><button id="back" title="back 0.25 m (S)">&#9660;</button><span></span>
+        </div>
+        <div class="pad" style="grid-template-columns:64px">
+          <button id="up" title="up 0.1 m (R)">up</button><span></span><button id="down" title="down 0.1 m (F)">down</button>
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px"><button id="land" class="amber">Land</button><button id="reset">Reset home / course start</button></div>
+      <p class="small"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>R</kbd>/<kbd>F</kbd> up/down · <kbd>H</kbd>/<kbd>Space</kbd> hold · <kbd>L</kbd> land, while this section is open. Moves ramp at <span id="horizontal_speed">-</span> m/s inside the fence.</p>
+      <button id="release">STOP DASHBOARD / HOLD</button>
+    </details>
+  </div>
+
+  <div class="card">
+    <h2>Events</h2>
+    <ol id="events" reversed></ol>
+  </div>
+</section>
+
+<!-- ============================== PLAN ============================== -->
+<section id="panel_plan" role="tabpanel" aria-labelledby="tab_plan" class="col" hidden>
+  <div class="card">
+    <h2>Route</h2>
+    <p id="course_status" class="lede">Checking the saved route…</p>
+    <p id="course_next" class="small">The saved route loads automatically.</p>
+    <div class="fields">
+      <label for="course_file">Load planner output (path.bin, path.csv or JSON)<input id="course_file" type="file" accept=".bin,.csv,.json,application/json,text/csv"></label>
+    </div>
+    <p id="course_file_status" class="small" role="status" aria-live="polite"></p>
+    <details id="course_import">
+      <summary id="course_import_label">Replace route (optional)</summary>
+      <label for="course_json" class="small">Trajectory JSON (filled in by the file loader, or paste)</label>
+      <textarea id="course_json" rows="5" spellcheck="false" placeholder='course_flu document: version 1, units "m", name, waypoints [[x,y,z],…], optional times_s.'></textarea>
+      <div class="row" style="margin-top:8px"><button id="course_save" class="go" disabled>Load route</button></div>
+    </details>
+    <p id="course_feedback" class="small" role="status"></p>
+  </div>
+
+  <div class="card">
+    <h2>3D course view <span id="view3d_status" class="small"></span></h2>
+    <div id="view3d" class="view3d"><p class="small">Load course geometry or a route, or press Show route in 3D.</p></div>
+    <div id="view3d_play_row" class="play3d" hidden>
+      <button id="view3d_play">Play</button><input id="view3d_t" type="range" min="0" max="1" step="0.01" value="0">
+      <span id="view3d_info" class="small"></span>
+    </div>
+    <p id="view3d_legend" class="small" hidden><span class="speedbar"></span> route colour = speed, slow → <span id="view3d_vmax"></span> m/s</p>
+    <div class="fields">
+      <label for="mesh_file">Course geometry: planner map.bin, STL, OBJ or PLY<input id="mesh_file" type="file" accept=".bin,.stl,.obj,.ply"></label>
+      <label for="plan_cfg_file">Planner config.yaml (sets the pad)<input id="plan_cfg_file" type="file" accept=".yaml,.yml"></label>
+      <button id="view3d_open">Show route in 3D</button>
+    </div>
+    <div class="fields">
+      <label for="pad_x">Pad x (m)<input id="pad_x" type="number" step="0.01" value="-2.5146"></label>
+      <label for="pad_y">Pad y (m)<input id="pad_y" type="number" step="0.01" value="0.9144"></label>
+      <label for="pad_z">Pad z (m)<input id="pad_z" type="number" step="0.01" value="0"></label>
+      <label for="pad_heading">Pad heading (°)<input id="pad_heading" type="number" step="1" value="0"></label>
+    </div>
+    <details>
+      <summary>Mesh transform (STL / OBJ / PLY only)</summary>
+      <div class="fields">
+        <label for="mesh_scale">Scale (to m)<input id="mesh_scale" type="number" step="any" placeholder="auto"></label>
+        <label for="mesh_up">Up axis<select id="mesh_up"><option value="z">Z</option><option value="y">Y</option></select></label>
+        <label for="mesh_yaw">Yaw (°)<input id="mesh_yaw" type="number" step="1" value="0"></label>
+        <label for="mesh_tx">Move x<input id="mesh_tx" type="number" step="0.01" value="0"></label>
+        <label for="mesh_ty">Move y<input id="mesh_ty" type="number" step="0.01" value="0"></label>
+        <label for="mesh_tz">Move z<input id="mesh_tz" type="number" step="0.01" value="0"></label>
+      </div>
+      <p class="small">Same convention as the planner app: map = Rz(yaw) · up-swap · (scale · CAD) + move. STEP can’t be read in a browser: export STL, or use the planner’s map.bin.</p>
+    </details>
+  </div>
+
+  <div class="card">
+    <h2>Start position</h2>
+    <p class="small">Put the drone on the launch mark, nose along the course’s +X (forward). +Y is left, +Z up.</p>
+    <div class="row"><button id="plan_claim">Take control</button><button id="course_capture" disabled>Set home / course start</button>
+      <label for="course_radius" class="small">Course radius (m) <input id="course_radius" type="number" min="0.5" max="20" step="0.5" value="7" required></label></div>
+  </div>
+
+  <div class="card">
+    <h2>Flight options</h2>
+    <div class="fields">
+      <label for="course_controller">Follower <select id="course_controller" disabled>
+        <option value="smooth_position">Smooth position</option>
+        <option id="course_velocity_option" value="velocity_tracker" disabled>Velocity tracker</option>
+      </select></label>
+      <label for="course_heading">Heading <select id="course_heading" disabled>
+        <option value="hold_start">Hold start heading</option>
+        <option value="path_tangent">Face travel</option>
+      </select></label>
+      <label for="course_avoid">Collision avoidance <select id="course_avoid" disabled>
+        <option value="shadow">Off (depth display only)</option>
+        <option value="avoid">On</option>
+        <option value="ego">EGO planner (local replanning)</option>
+      </select></label>
+      <p id="ego_line" class="small" hidden></p>
+    </div>
+    <p id="course_controller_status" class="small" role="status" aria-live="polite"></p>
+    <p id="course_run_status" class="small" role="status" aria-live="polite"></p>
+    <p id="course_motion_limits" class="small"></p>
+    <p class="small">Smooth position is the better follower near obstacles and through windows. A finished course lands automatically.</p>
+  </div>
+
+  <div class="card" id="course_planning_card">
+    <h2>Obstacle planning</h2>
+    <div id="course_planning" class="fields">
+      <label for="course_clearance">Clearance (m)<input id="course_clearance" type="number" min="0.15" max="1" step="0.05" value="0.30" required></label>
+      <label for="course_offset">Max detour (m)<input id="course_offset" type="number" min="0" max="2" step="0.05" value="1.50" required></label>
+      <button id="course_preview" disabled>Replan route</button>
+    </div>
+    <p id="course_adjustment" class="small"></p>
+    <p class="small">Clearance is measured from the drone’s centre. 0.30 m suits this 51 cm drone; openings it keeps are flown straight through.</p>
+  </div>
+
+  <div class="card" id="marks_card">
+    <h2>Avoidance zones &amp; holes</h2>
+    <label class="small"><input id="zones_only" type="checkbox" style="width:auto"> Avoid only inside marked zones (fly the plan exactly everywhere else)</label>
+    <div class="fields">
+      <label for="zone_radius">Zone radius (m)<input id="zone_radius" type="number" min="0.3" max="5" step="0.1" value="1.5"></label>
+      <label for="hole_height">Hole centre height (m above home)<input id="hole_height" type="number" min="0.3" max="2" step="0.05" value="1.00"></label>
+    </div>
+    <div class="row"><button id="zone_here">Zone at drone</button><button id="zone_map">Zone on map…</button></div>
+    <div class="row"><button id="poly_start">Draw polygon zone…</button><button id="poly_undo" disabled>Undo corner</button><button id="poly_finish" disabled>Finish polygon</button><button id="poly_cancel" disabled>Cancel</button></div>
+    <div class="row"><button id="hole_here">Hole at drone</button><button id="hole_map">Hole on map…</button></div>
+    <ul id="marks_list" class="small"></ul>
+    <div class="row"><button id="marks_clear">Clear zones &amp; holes</button></div>
+    <p id="marks_warn" class="small" style="color:var(--warn, #d4a017)"></p>
+    <p id="marks_hint" class="small" role="status" aria-live="polite">Most precise: hold the drone in the middle of the hole and press “Hole at drone”. Hole control (avoid mode, hole inside a zone you drew): the drone hovers 1.5 m before the hole until its measured centre stops moving, lines up, then flies straight through.</p>
+  </div>
+</section>
+</div>
+
+<!-- ============================== MAP (both tabs) ============================== -->
+<aside class="col side">
+  <div class="card">
+    <h2>Top-down <span id="fr" class="small"></span></h2>
+    <canvas id="map" width="400" height="400"></canvas>
+    <div class="depth-bar">
+      <label><input id="show_depth" type="checkbox" checked>Depth</label>
+      <span class="depth-key">estimated surfaces</span>
+    </div>
+    <p id="depth_status" class="small depth-status">Waiting for ML depth.</p>
+    <div class="route-options">
+      <label class="route-original"><input id="show_course_original" type="checkbox" checked>Saved route</label>
+      <label id="course_adjusted_key" class="route-adjusted"><input id="show_course_adjusted" type="checkbox" checked>Adjusted route</label>
+      <label><input id="fit_course" type="checkbox">Fit course</label>
+    </div>
+    <p id="map_frame" class="small">Forward is up; left is left.</p>
+    <form id="point_form" class="point-fields">
+      <label for="point_forward">Forward (m)<input id="point_forward" type="number" step="0.01" value="0" required></label>
+      <label for="point_left">Left (m)<input id="point_left" type="number" step="0.01" value="0" required></label>
+      <button id="goto" class="go" type="submit" disabled>Go to point</button>
+    </form>
+    <p id="point_hint" class="small" role="status" aria-live="polite">Tap the map to pick a point. Prepare a hover or reset home first.</p>
+    <p id="point_progress" class="small"></p>
+    <p id="heading_status" class="small"></p>
+  </div>
+  <div class="card">
+    <h2>Depth camera <span id="depth_view_age" class="small"></span></h2>
+    <img id="depth_view" alt="Left camera and ML depth, near is red">
+    <p class="small">Camera left, ML depth right (0.3–4 m, near red, far blue).</p>
+    <p id="pass_probe" class="small" role="status" aria-live="polite">Pass-through: -</p>
+  </div>
+</aside>
+</div>
+<script>
+const K = new URLSearchParams(location.search).get('k') || '';
+const C = Array.from(crypto.getRandomValues(new Uint8Array(6)), b => b.toString(16).padStart(2, '0')).join('');
+const $ = id => document.getElementById(id);
+let S = null, lastOk = 0, rtt = null, inflight = false, mapOrigin = null, mapView = null;
+let draftPoint = null, homeKey = null;
+let courseImportLoaded = null;
+let lastCoursePreview = null;
+let courseControllerPending = false;
+let courseOptionsPending = false;
+let launchPending = false;
+const courseControllerIds = ['smooth_position','velocity_tracker'];
+const courseControllerLabel = id => id==='velocity_tracker' ? 'Velocity tracker' : 'Smooth position';
+
+function yes(v, good = true) {
+  if (v === null || v === undefined) return '<span class="dot" style="background:#555"></span>-';
+  const ok = good ? v : !v;
+  return `<span class="dot" style="background:${ok ? 'var(--ok)' : 'var(--bad)'}"></span>${v ? 'yes' : 'no'}`;
+}
+const f2 = v => (v === null || v === undefined) ? '-' : Number(v).toFixed(2);
+
+const hasVersion = v => (typeof v==='string'&&v.length>0)||(typeof v==='number'&&Number.isFinite(v));
+function mergeGeometry(next,previous,version,unchanged,defaults) {
+  const fields=Object.keys(defaults), owns=(o,k)=>Object.prototype.hasOwnProperty.call(o,k);
+  const missing=fields.filter(k=>!owns(next,k));
+  if (!missing.length) return;
+  const matching=previous&&hasVersion(next[version])&&next[version]===previous[version];
+  const usable=(o,k)=>owns(o,k)&&(Array.isArray(o[k])||(k==='camera_xy'&&o[k]===null));
+  if (next[unchanged]===true&&matching&&missing.every(k=>usable(previous,k))) {
+    for (const k of missing) next[k]=previous[k];
+  } else {
+    // A delayed conditional response may refer to a cache entry replaced by a
+    // command response. Never attach different geometry to the new metadata.
+    for (const k of fields) next[k]=defaults[k];
+    delete next[version]; // The next ordinary poll requests complete geometry.
+  }
+}
+
+function applyState(next) {
+  if (!next||typeof next!=='object'||Array.isArray(next)) throw new Error('Invalid state');
+  const previous=S, state={...next};
+  if (state.depth) {
+    state.depth={...state.depth};
+    mergeGeometry(state.depth,previous&&previous.depth,'geometry_version','geometry_unchanged',
+                  {points:[],camera_xy:null,view_polygon:[]});
+  }
+  if (state.course) {
+    state.course={...state.course};
+    mergeGeometry(state.course,previous&&previous.course,'original_version','original_unchanged',
+                  {original_world_enu:[],original_yaw_enu_rad:[]});
+    mergeGeometry(state.course,previous&&previous.course,'adjusted_version','adjusted_unchanged',
+                  {adjusted_world_enu:[],adjusted_yaw_enu_rad:[]});
+  }
+  S=state;
+  return S;
+}
+
+function stateRequestUrl() {
+  const query=[`k=${encodeURIComponent(K)}`,`c=${encodeURIComponent(C)}`];
+  for (const [key,value] of [['dg',S&&S.depth&&S.depth.geometry_version],
+                           ['co',S&&S.course&&S.course.original_version],
+                           ['ca',S&&S.course&&S.course.adjusted_version]]) {
+    if (hasVersion(value)) query.push(`${key}=${encodeURIComponent(String(value))}`);
+  }
+  return '/api/state?'+query.join('&');
+}
+
+async function poll() {
+  if (inflight) return;
+  if (document.hidden) { $('toast').textContent = 'tab hidden: heartbeat paused'; return; }
+  inflight = true;
+  const t0 = performance.now(), ac = new AbortController(), to = setTimeout(() => ac.abort(), 900);
+  try {
+    const r = await fetch(stateRequestUrl(), {cache: 'no-store', signal: ac.signal});
+    if (r.ok) { applyState(await r.json()); rtt = performance.now() - t0; lastOk = performance.now(); render(); }
+  } catch (e) { /* counted by the link watchdog */ }
+  finally { clearTimeout(to); inflight = false; }
+}
+
+async function cmd(op, extra = {}) {
+  try {
+    const r = await fetch(`/api/cmd?k=${encodeURIComponent(K)}`, {method: 'POST', cache: 'no-store',
+      headers: {'Content-Type': 'application/json'}, body: JSON.stringify(Object.assign({c: C, op}, extra))});
+    const j = await r.json();
+    $('toast').textContent = (j.ok ? '' : 'refused: ') + j.msg;
+    if (j.state) { applyState(j.state); render(); }
+    return j;
+  } catch (e) { $('toast').textContent = 'No reply to the command. Check aircraft status before trying again.'; return {ok:false}; }
+}
+
+function flightStopControls() {
+  const elapsed=Math.max(0,(performance.now()-lastOk)/1000), fc=S&&S.fc, pos=S&&S.pos, caps=S&&S.stop_controls;
+  const current=!!(S&&S.control_build==='adaptive-flight-v6'&&S.live&&S.you_own&&S.mode!=='pilot'&&
+    lastOk&&elapsed<=1&&!document.hidden&&fc&&fc.px4_link&&Number.isFinite(fc.age_s)&&fc.age_s>=0&&fc.age_s+elapsed<=1&&
+    (!fc.armed||fc.offboard)&&pos&&pos.valid&&Number.isFinite(pos.age_s)&&pos.age_s>=0&&pos.age_s+elapsed<=.5&&
+    [pos.x,pos.y,pos.z,pos.yaw_deg].every(Number.isFinite));
+  return {hold:!!(current&&caps&&caps.hold===true),land:!!(current&&caps&&caps.land===true)};
+}
+
+function flightView() {
+  const flight=$('flight_mode').value==='hover'?'hover':'course';
+  const result={flight,op:'launch',enabled:false,label:flight==='hover'?'Take off & hover':'Take off',message:''};
+  const stop=message=>({...result,message});
+  if (!S) return {...result,label:'Connecting…',message:'Waiting for the aircraft.'};
+  const elapsed=Math.max(0,(performance.now()-lastOk)/1000), fc=S.fc, pos=S.pos;
+  if (!lastOk || elapsed>1 || document.hidden) return stop('Connection is not current. Keep this tab open and in front.');
+  if (S.control_build!=='adaptive-flight-v6') return stop('Waiting for the updated flight software.');
+  const aircraftFresh=!!(fc&&fc.px4_link&&Number.isFinite(fc.age_s)&&fc.age_s>=0&&fc.age_s+elapsed<=1);
+  const positionFresh=!!(pos&&pos.valid&&Number.isFinite(pos.age_s)&&pos.age_s>=0&&pos.age_s+elapsed<=.5&&
+    [pos.x,pos.y,pos.z,pos.yaw_deg].every(Number.isFinite));
+  if (!aircraftFresh||!positionFresh) return stop('Aircraft position or status is not current. Use the controller if airborne.');
+  if (launchPending) return {...result,label:'Sending…',message:'Waiting for the aircraft to confirm the request.'};
+  if (S.arm_request && S.arm_request.pending) return {...result,label:'Waiting for PX4…',message:S.arm_request.message || 'Waiting for arming confirmation.'};
+  if (fc && fc.armed) {
+    const run=S.course_run, launch=S.course_launch;
+    const stops=flightStopControls();
+    const available=stops.hold&&stops.land?'Hold or Land is available.':stops.land?'Land is available.':stops.hold?'Hold is available.':'';
+    if (!S.you_own) return {...result,label:'Aircraft armed',message:'This tab does not have control. Use the controlling tab or the controller to land.'};
+    if (S.mode==='failsafe'||S.mode==='pilot'||!fc.offboard) {
+      const cause=/obstacle.*(stop|stopping)|stopping.*(margin|obstacle)/i.test(S.reason||'')?
+        'Obstacle stopping margin reached.':'Course stopped.';
+      return {...result,label:'Flight stopped',message:cause+' '+(available||'Use the controller to land.')};
+    }
+    if (!S.runtime_ready) return {...result,label:'Check aircraft',message:available||'Aircraft checks failed. Use the controller to land.'};
+    if (S.mode==='landing') return {...result,label:'Landing',message:'Descending. Keep this tab in front.'};
+    if (S.mode!=='engaged') return fc.landed ?
+      {...result,label:'Landed',message:'Motors are still armed. Disarm using the controller.'} :
+      {...result,label:'Dashboard control inactive',message:available||'Use the controller to land.'};
+    if (S.obstacle_mode!=='shadow'&&S.course_replan&&S.course_replan.active)
+      return {...result,label:'Holding / replanning',message:'Checking a route around the obstacle. Continues automatically when clear; Hold cancels.'};
+    if (launch && launch.active && launch.state==='waiting_route') {
+      if (S.obstacle_mode==='shadow')
+        return {...result,label:'Holding',message:'Preparing to follow the saved course. Hold cancels.'};
+      const d=S.depth, sensing=!!(d&&d.status==='live'&&Number.isFinite(d.age_s)&&d.age_s>=0&&
+        d.age_s+elapsed<=1.5&&Array.isArray(d.points)&&d.points.length);
+      return {...result,label:'Holding',message:(sensing?'Waiting for a checked route.':'Waiting for obstacle sensing.')+
+        ' Course starts automatically; Hold cancels.'};
+    }
+    if (launch && launch.active) return {...result,label:'Taking off',message:'Taking off to the course start. Keep this tab in front.'};
+    const hop=S.hop;
+    if (hop && (hop.state==='land'||hop.state==='land_final')) return {...result,label:'PX4 landing',
+      message:hop.state==='land'?'Course complete. PX4 is landing; the return hop takes off by itself after touchdown.':'Return hop complete. PX4 is landing.'};
+    if (run && run.active && hop && hop.state==='flying') return {...result,label:'Return hop',message:`${Math.round((run.progress||0)*100)}% complete. Lands at the end.`};
+    if (run && run.active && hop && hop.state==='armed') return {...result,label:'Flying course',message:`${Math.round((run.progress||0)*100)}% complete; then PX4 lands and it takes off into the return hop.`};
+    if (run && run.active) return {...result,label:'Flying course',message:`${Math.round((run.progress||0)*100)}% complete. Keep this tab in front.`};
+    return {...result,label:fc.landed?'Taking off':'Holding position',message:run&&run.state==='complete'?'Course complete. Holding position; press Land when ready.':'Keep this tab in front. Press Land to finish.'};
+  }
+  if (!fc.landed) return stop('Place the aircraft on the ground with motors disarmed.');
+  if (S.hop && S.hop.state==='ready') {
+    if (!S.live) return stop('Takeoff is disabled in preview mode.');
+    if (!S.ready) return stop((S.blockers||[]).join('; ') || 'Waiting for aircraft preflight checks.');
+    return {...result,flight:'hop',enabled:true,label:'Take off · return hop',message:'Taking off into the return hop automatically; press if it has not started.'};
+  }
+  if (S.owner && !S.you_own && !(Number.isFinite(S.link_age_s)&&S.link_age_s+elapsed>3))
+    return stop('Another dashboard has control. Close that tab, then try here.');
+  let view;
+  if (flight==='course') {
+    view=coursePaths();
+    const count=view.course && view.course.original_count;
+    if (!Number.isInteger(count)||count<2) return stop('No course loaded. Open Advanced to import one.');
+    const first=view.original[0], a=view.anchor, h=S.home;
+    const sameHeading=!!(a&&h&&Math.abs(Math.atan2(Math.sin(h.yaw_deg*Math.PI/180-a.yaw_rad),Math.cos(h.yaw_deg*Math.PI/180-a.yaw_rad)))<=.002);
+    const startMatches=!!(a&&h&&sharedHomeStart(view)&&sameHeading&&first&&
+      Math.hypot(pos.x-first[0],pos.y-first[1])<=.05&&Math.hypot(pos.x-h.x,pos.y-h.y,pos.z-h.z)<=.10);
+    if (!startMatches) return {...result,op:'launch_setup',enabled:true,label:'Set start here',message:'Place the aircraft at the course start, pointing forward. This sets the start without arming.'};
+  }
+  if (!S.live) return stop('Takeoff is disabled in preview mode.');
+  if (!S.ready) return stop((S.blockers||[]).join('; ') || 'Waiting for aircraft preflight checks.');
+  // Not in Offboard is fine: the server switches PX4 to Offboard, then arms.
+  if (flight==='hover') {
+    const alt=Number.parseFloat($('flight_height').value), p=S.params;
+    if (!p || !Number.isFinite(alt)||alt<p.min_alt_m||alt>p.max_alt_m)
+      return stop(`Choose a height between ${p?p.min_alt_m:.3} and ${p?p.max_alt_m:2} m.`);
+    return {...result,enabled:true,message:`Takes off to ${alt.toFixed(1)} m and holds above the launch point. Keep this tab in front.`};
+  }
+  const controller=S.course_controller;
+  if (controller&&controller.selected==='velocity_tracker'&&controller.available!==true)
+    return stop('Selected follower is unavailable. Choose Smooth position in Advanced.');
+  const radius=Number.parseFloat($('course_radius').value);
+  if (!Number.isFinite(radius)||radius<.5||radius>20) return stop('Set a course radius between 0.5 and 20 m in Advanced.');
+  const points=view.course.original_world_enu, p=S.params;
+  if (!Array.isArray(points)||points.length<2||!points.every(finitePoint))
+    return stop('Waiting for the saved course positions.');
+  if (!p||points.some(point=>point[2]-pos.z<p.min_alt_m||point[2]-pos.z>p.max_alt_m))
+    return stop('The saved course is outside the allowed flight height. Check the route in Advanced.');
+  if (points.some(point=>Math.hypot(point[0]-S.home.x,point[1]-S.home.y)>radius))
+    return stop('The saved course is outside its flight radius. Check the route in Advanced.');
+  return {...result,enabled:true,message:S.obstacle_mode==='shadow'?
+    'Takes off vertically, then flies the saved course at up to 1 m/s.':
+    'Takes off vertically, then waits for a checked route before moving.'};
+}
+
+function renderFlight() {
+  const view=flightView(), fc=S&&S.fc;
+  $('obstacle_mode').hidden=!(S&&(S.obstacle_mode==='shadow'||S.obstacle_mode==='ego'));
+  $('obstacle_mode').textContent=S&&S.obstacle_mode==='ego'?'EGO planner mode · our guard off':'Depth display only · avoidance off';
+  { const e = S && S.ego, on = S && S.obstacle_mode === 'ego';
+    $('ego_line').hidden = !on;
+    if (on) $('ego_line').textContent = !e || !e.alive ? 'EGO planner: NOT running (team_ws/claude/ego/run_ego.sh start)'
+      : `EGO planner: running · trajectory ${e.setpoint_age_s === null ? 'none yet' : e.setpoint_age_s + ' s old'}`
+        + (e.goal ? ` · goal ${e.goal.map(v => v.toFixed(1)).join(', ')}` : ' · plans once a course or dry run starts (green line)'); }
+  $('flight_launch').disabled=!view.enabled;
+  $('flight_launch').textContent=view.label;
+  { // second green button: same takeoff; at the end PX4 lands, then the Fly button takes off into the return hop
+    const r=S&&S.course_return, can=!!(r&&view.op==='launch'&&view.flight==='course');
+    $('flight_launch_hop').hidden=!can;
+    $('flight_launch_hop').disabled=!(can&&view.enabled);
+    $('hop_line').hidden=!r;
+    if (r) $('hop_line').textContent=`Return hop loaded: ${r.count} points, ${r.duration_s?r.duration_s.toFixed(1)+' s, ':''}up to ${r.max_height_m} m`
+      + (S.hop?` · ${{armed:'after the course',land:'PX4 landing',ready:'ready to take off',flying:'flying',land_final:'PX4 landing'}[S.hop.state]||S.hop.state}`:'');
+  }
+  $('flight_status').textContent=view.message;
+  $('flight_height_wrap').hidden=view.flight!=='hover';
+  const pending=launchPending||!!(S&&S.arm_request&&S.arm_request.pending);
+  $('flight_mode').disabled=pending||!!(fc&&fc.armed);
+  $('flight_height').disabled=$('flight_mode').disabled;
+  if (S&&S.params) { $('flight_height').min=S.params.min_alt_m; $('flight_height').max=S.params.max_alt_m; }
+  const fresh=!!(lastOk&&performance.now()-lastOk<=1000&&!document.hidden);
+  const stops=flightStopControls();
+  $('flight_stops').hidden=!(stops.hold||stops.land||fc&&fc.armed||S&&['engaged','landing'].includes(S.mode));
+  $('flight_hold').disabled=$('hold').disabled=!stops.hold;
+  $('flight_land').disabled=$('land').disabled=!stops.land;
+  // Emergency disarm remains available when status is missing or stale.
+  const statusFresh=!!(fresh&&fc&&fc.px4_link&&Number.isFinite(fc.age_s)&&fc.age_s>=0&&fc.age_s+Math.max(0,(performance.now()-lastOk)/1000)<=1);
+  $('flight_kill').disabled=!(S&&S.live&&(!statusFresh||fc.armed||pending||!fc.landed));
+}
+
+async function courseCmd(op, extra = {}) {
+  try {
+    const r = await fetch(`/api/course?k=${encodeURIComponent(K)}`, {method:'POST',cache:'no-store',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({c:C,op,...extra})});
+    const j = await r.json();
+    $('course_feedback').textContent = (j.ok ? '' : 'Refused: ') + (j.msg || j.error || 'Course request failed');
+    if (j.state) { applyState(j.state); render(); }
+    return j;
+  } catch (e) { $('course_feedback').textContent = 'Course request was not delivered.'; return null; }
+}
+
+let markMode = null;   // 'zone' | 'hole' | 'poly' while waiting for map clicks
+let dryMsg = '';      // last dry-run refusal, shown in the dry-run card
+let draftPoly = [];    // world [x, y] corners of the polygon being drawn
+function polyButtons() {
+  const drawing = markMode === 'poly';
+  $('poly_undo').disabled = !drawing || !draftPoly.length;
+  $('poly_finish').disabled = !drawing || draftPoly.length < 3;
+  $('poly_cancel').disabled = !drawing;
+  if (drawing) $('marks_hint').textContent = `Polygon: ${draftPoly.length} corner(s). Click the map to add corners, then Finish (3+).`;
+}
+function renderMarks() {
+  const c = S.course || {}, m = c.marks, w = c.marks_world;
+  if (!m) return;
+  if (document.activeElement !== $('zones_only')) $('zones_only').checked = !!m.zones_only;
+  const items = [];
+  (m.zones || []).forEach((z, i) => items.push(`<li>Zone ${i + 1}: ${z[0].toFixed(2)} fwd, ${z[1].toFixed(2)} left, r ${z[2].toFixed(1)} m <button data-rm="zone" data-i="${i}">remove</button></li>`));
+  (m.polygons || []).forEach((poly, i) => items.push(`<li>Polygon zone ${i + 1}: ${poly.length} corners <button data-rm="polygon" data-i="${i}">remove</button></li>`));
+  const ctl = new Set(((w && w.control_holes) || []).map(h => h.map(v => v.toFixed(3)).join()));
+  (m.holes || []).forEach((h, i) => {
+    const inZone = w && w.holes[i] && ctl.has(w.holes[i].map(v => v.toFixed(3)).join());
+    items.push(`<li>Hole ${i + 1}: ${h[0].toFixed(2)} fwd, ${h[1].toFixed(2)} left, ${h[2].toFixed(2)} m up`
+      + (!w ? ' · set home / course start to use it' : inZone ? ' · hole control' : ' · <b>outside every zone: ignored</b>')
+      + ` <button data-rm="hole" data-i="${i}">remove</button></li>`);
+  });
+  const html = items.length ? items.join('') : '<li>No zones or holes marked.</li>';
+  if ($('marks_list').innerHTML !== html) $('marks_list').innerHTML = html;
+  $('marks_warn').textContent = (m.zones_only && !(m.zones || []).length && !(m.polygons || []).length)
+    ? 'Avoid-only-in-zones is on but no zone is drawn: obstacles are ignored everywhere.' : '';
+}
+function renderDry() {
+  const d = S.dry_run;
+  $('dry_stop').disabled = !d || d.state !== 'running';
+  const ds = S.dry_start;
+  const startHint = !S.home ? 'Set home / course start first (Plan tab).'
+    : !ds ? 'Load a route and set home first.'
+    : ds.distance_m <= 0.40 ? `At the course start (${ds.distance_m.toFixed(2)} m away): press Start dry run.`
+    : `Lift it to the course start: ${ds.above_home_m.toFixed(2)} m above the launch mark (now ${ds.height_now_m.toFixed(2)} m up, ${ds.distance_m.toFixed(2)} m away; start within 0.40 m).`;
+  if (!d || d.state !== 'running') $('dry_carry').textContent = startHint;
+  if (!d) { if (!dryMsg) $('dry_status').textContent = 'Not running. Battery and failsafe checks do not apply: motors stay off.'; return; }
+  if (d.state === 'running' && d.carry) {
+    const c = d.carry, part = (v, a, b) => Math.abs(v) < .03 ? null : `${Math.round(Math.abs(v) * 100)} cm ${v > 0 ? a : b}`;
+    const moves = [part(c.forward_m, 'FORWARD', 'BACK'), part(c.left_m, 'LEFT', 'RIGHT'), part(c.up_m, 'UP', 'DOWN')].filter(Boolean);
+    $('dry_carry').textContent = 'Carry: ' + (moves.length ? moves.join(', ') : 'hold here (on the route)');
+  }
+  const pt = d.pass_through;
+  const extra = pt && pt.state === 'passing' ? ` · centring: ${Math.round(pt.shift_lat_m * 100)} cm left, ${Math.round(pt.shift_dz_m * 100)} cm up` : '';
+  $('dry_status').textContent = `${d.state}: ${d.reason || ''} · ${d.progress === undefined ? '' : Math.round(d.progress * 100) + '% · '}nudges ${d.nudges}, stops ${d.pauses}${extra}`
+    + (d.events && d.events.length ? ` · last: ${d.events[d.events.length - 1]}` : '');
+}
+
+function passProbeText(pp) {
+  // Pass-through centring: hand-held probe (straight 3 m out of the nose) or the live flight state.
+  if (!pp || pp.age_s > 2) return 'Pass-through: no data';
+  const dir = (l, u) => {
+    const a = [];
+    if (Math.abs(l) >= .01) a.push(`${Math.round(Math.abs(l) * 100)} cm ${l > 0 ? 'LEFT' : 'RIGHT'}`);
+    if (Math.abs(u) >= .01) a.push(`${Math.round(Math.abs(u) * 100)} cm ${u > 0 ? 'UP' : 'DOWN'}`);
+    return a.length ? a.join(', ') : 'nothing (already centred)';
+  };
+  const cm = v => v === null || v === undefined ? '–' : `${Math.round(v * 100)}`;
+  const bounds = b => b ? ` [walls L ${cm(b.left)} / R ${cm(b.right)} cm, above ${cm(b.above)} / below ${cm(b.below)} cm]` : '';
+  if (pp.mode === 'flight') return pp.state === 'hover' ? `Hole control: ${pp.reason} (${pp.hover_s}s)`
+    : pp.state === 'commit' ? 'Hole control: hole locked, lined up, flying straight through'
+    : `Hole control: flying the plan (${pp.holes_left} hole${pp.holes_left === 1 ? '' : 's'} ahead)`;
+  if (pp.state === 'opening' && pp.needed)
+    return `Probe: opening ${pp.ahead_m} m ahead → would move ${dir(pp.move_left_m, pp.move_up_m)} `
+      + `(prop clearance ${pp.clearance_before_m} → ${pp.clearance_after_m} m)` + bounds(pp.bounds);
+  if (pp.state === 'opening')
+    return `Probe: opening ${pp.ahead_m} m ahead, no correction needed (prop clearance ${pp.clearance_before_m} m)` + bounds(pp.bounds);
+  if (pp.state === 'no holes') return 'Probe: no hole marked, so pass-through never acts. Mark the window/tunnel on the Plan tab (hold the drone in it, “Hole at drone”).';
+  if (pp.state === 'none') return 'Probe: no marked hole it can pass through in the 3 m ahead of the nose';
+  return pp.state === 'error' ? `Probe error: ${pp.reason}` : 'Probe: waiting for depth';
+}
+
+function render() {
+  if (!S) return;
+  const m = S.mode;
+  $('heading_status').textContent = m==='engaged' && S.heading && S.heading.reason ?
+    'Forward camera: '+S.heading.reason : 'Horizontal moves turn to face travel before advancing.';
+  $('mode').textContent = m.toUpperCase(); $('mode').className = 'm-' + m;
+  $('reason').textContent = S.reason || '';
+  $('runmode').textContent = S.live ? 'LIVE: flight controls + arm/disarm' : 'DRY RUN: preview topic, the drone ignores it';
+  $('runmode').className = 'badge ' + (S.live ? 'live' : 'dry');
+  $('own').textContent = S.you_own ? 'this tab' : (S.owner ? `another tab (${S.owner})` : 'nobody');
+  $('ownhint').textContent = S.you_own ? '' : 'view only until you take control';
+  $('hb').innerHTML = S.you_own ? `${yes(S.link_alive)} ${f2(S.link_age_s)} s ago` : '-';
+  $('rtt').textContent = rtt === null ? '-' : `${rtt.toFixed(0)} ms`;
+  $('hbto').textContent = `${S.params.hb_timeout_s} s of silence`;
+  const fc = S.fc;
+  $('px4').innerHTML = fc ? yes(fc.px4_link) : yes(null);
+  $('nav').textContent = fc ? fc.nav : '-';
+  $('armed').innerHTML = fc ? yes(fc.armed, false) : yes(null);
+  $('off').innerHTML = fc ? `${fc.offboard ? '<span class="dot" style="background:var(--info)"></span>ACTIVE' : 'no'}` : '-';
+  $('landed').textContent = fc ? (fc.landed ? 'yes' : 'no') : '-';
+  $('clamped').textContent = fc && fc.clamped && fc.clamped.length ? fc.clamped.join(', ') : '-';
+  $('vio').innerHTML = S.vio ? `${yes(S.vio.vo_state === 1)} ${S.vio.vo_state === 1 ? 'tracking' : 'NOT tracking'}` : '-';
+  { // team gyro heading fix: calibration (drone still on the pad, motors off) gates ARM when enabled
+    const hf = S.heading_fix, h = hf && hf.status;
+    if (!hf || !hf.enabled) $('hfix').textContent = 'off (PX4 gets levelled VIO)';
+    else if (!h || h.age_s > 2) $('hfix').innerHTML = `${yes(false)} no status`;
+    else if (!h.calibrated) $('hfix').innerHTML =
+      `${yes(false)} calibrating: keep the drone still ${Math.max(0, h.calib_s - h.still_s).toFixed(0)} s more${h.landed === false ? ' (needs landed)' : ''}`;
+    else $('hfix').innerHTML = `${yes(true)} calibrated (${h.still_s.toFixed(0)} s still), correction ${h.correction_deg >= 0 ? '+' : ''}${h.correction_deg.toFixed(1)}&deg;`;
+  }
+  $('pass_probe').textContent = passProbeText(S.pass_probe);
+  if (markMode && S.fc && S.fc.armed) cancelMarkMode('Map placement cancelled: the drone armed.');
+  renderMarks(); renderDry();
+  $('batt').textContent = S.batt ? `${S.batt.v} V${S.batt.pct === null ? '' : ', ' + S.batt.pct + '%'}` : 'no data';
+  const p = S.pos;
+  const home = S.home, yaw0 = home ? home.yaw_deg * Math.PI / 180 : 0;
+  const dx = p ? p.x - (home ? home.x : 0) : 0, dy = p ? p.y - (home ? home.y : 0) : 0;
+  $('position_title').textContent = home ? 'Position from home (forward / left)' : 'Position (PX4 local, ENU)';
+  $('xy').textContent = p ? `${f2(dx * Math.cos(yaw0) + dy * Math.sin(yaw0))} / ${f2(-dx * Math.sin(yaw0) + dy * Math.cos(yaw0))} m` : '-';
+  const eng = m === 'engaged' || m === 'landing';
+  $('z').textContent = p ? (eng ? `${f2(p.z - S.ground_z)} m above takeoff` : home ? `${f2(p.z - home.z)} m above home` : `${f2(p.z)} m (PX4 local z)`) + (p.valid ? '' : ' INVALID') : '-';
+  $('range_height').textContent = S.height && S.height.range_m !== null ? `${f2(S.height.range_m)} m (PX4 estimate)` : 'unavailable';
+  $('yaw').textContent = p ? `${f2(home ? ((p.yaw_deg - home.yaw_deg + 540) % 360 - 180) : p.yaw_deg)} deg${home ? ' from home' : ''}` : '-';
+  $('talt').textContent = (m === 'engaged' || m === 'landing') ? `${f2(S.target_alt)} m` : '-';
+  $('out').textContent = S.out ? `${S.out[0]} ${S.out[1].map(f2).join(', ')}` : 'none';
+  $('fr').textContent = `(${S.params.fence_r_m} m)`;
+  $('alt').min = S.params.min_alt_m; $('alt').max = S.params.max_alt_m;
+  $('height_limits').textContent = `Allowed height: ${S.params.min_alt_m}–${S.params.max_alt_m} m above takeoff`;
+  $('horizontal_speed').textContent = Number.isFinite(S.params.v_xy) ? String(S.params.v_xy) : '-';
+  const key = JSON.stringify(S.home);
+  if (key !== homeKey) {
+    homeKey = key; draftPoint = null;
+    $('point_forward').value = '0'; $('point_left').value = '0';
+  }
+  const w = [...(S.blockers || [])];
+  $('ready').innerHTML = yes(S.ready);
+  $('telemetry').textContent = S.telemetry_source || '-';
+  if (S.live && S.other_publishers > 0) w.push(`${S.other_publishers} other node(s) publish ${S.setpoint_topic} (square_mission?). Engage is refused until it is stopped.`);
+  if (S.vio && S.vio.vo_state !== 1) w.push('cuVSLAM is not tracking.');
+  if (fc && !fc.armed && fc.landed && S.floor_offset !== null && S.floor_offset !== undefined && Math.abs(S.floor_offset) > 0.2)
+    w.push(`Flight interface ground reference differs from PX4 by ${S.floor_offset.toFixed(2)} m; hover preparation is blocked.`);
+  if (fc && fc.armed && !fc.offboard && (m === 'engaged')) w.push('Armed. Dashboard does not change flight mode; use the configured flight interface handover.');
+  $('warn').style.display = w.length ? 'block' : 'none'; $('warn').textContent = w.join(' ');
+  const own = S.you_own, flying = m === 'engaged';
+  $('arm').disabled = !(own && S.live); $('disarm').disabled = !S.live;
+  $('armstatus').textContent = S.arm_request ? S.arm_request.message : 'PX4 decides whether to accept each request.';
+  $('claim').disabled = $('plan_claim').disabled = own;
+  for (const id of ['fwd', 'back', 'left', 'right', 'up', 'down', 'hold', 'setalt']) $(id).disabled = !(own && flying);
+  $('engage').disabled = !(own && m === 'idle' && (!S.live || S.ready));
+  $('land').disabled = !(own && flying);
+  $('reset').disabled = !(own && fc && fc.px4_link && fc.age_s <= 1 && !fc.armed && fc.landed);
+  $('release').disabled = !own;
+  $('events').replaceChildren(...S.events.slice().reverse().map(e => { const li = document.createElement('li'); li.textContent = e[1]; return li; }));
+  renderCourse();
+  renderFlight();
+  renderPoint();
+  draw();
+}
+
+function homeToWorld(forward, left) {
+  const h = S.home, a = h.yaw_deg * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+  return [h.x + forward * c - left * s, h.y + forward * s + left * c];
+}
+function worldToHome(x, y) {
+  const h = S.home, a = h.yaw_deg * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+  const dx = x - h.x, dy = y - h.y;
+  return [dx * c + dy * s, -dx * s + dy * c];
+}
+function renderPoint() {
+  $('goto').disabled = true;
+  if (!S || !S.home) {
+    $('point_hint').textContent = 'Prepare a hover or reset home to set the coordinate origin.';
+    $('point_progress').textContent = ''; return;
+  }
+  const active = S.mode === 'engaged', fc = S.fc;
+  if (active && S.pos) {
+    const distance = Math.hypot(S.pos.x - S.target[0], S.pos.y - S.target[1]);
+    const [f, l] = worldToHome(S.target[0], S.target[1]);
+    $('point_progress').textContent = `Commanded target: ${f2(f)} forward / ${f2(l)} left · ${f2(distance)} m away`;
+  } else $('point_progress').textContent = '';
+  if (!draftPoint) {
+    $('point_hint').textContent = 'Enter coordinates or tap the map. Go to point keeps the current target height.'; return;
+  }
+  const [x, y] = homeToWorld(draftPoint.forward, draftPoint.left);
+  const center = active ? S.engage_xy : [S.home.x, S.home.y];
+  const inside = Math.hypot(x - center[0], y - center[1]) <= S.params.fence_r_m + 1e-9;
+  if (!inside) {
+    $('point_hint').textContent = `Selected point is outside the ${S.params.fence_r_m} m movement radius.`; return;
+  }
+  $('point_hint').textContent = `Selected: ${f2(draftPoint.forward)} m forward / ${f2(draftPoint.left)} m left. Height stays unchanged.`;
+  const fresh = S.pos && S.pos.valid && S.pos.age_s <= 0.5 && fc && fc.px4_link && fc.age_s <= 1;
+  const airborne = active && fc && fc.armed && fc.offboard && !fc.landed;
+  $('goto').disabled = !(S.you_own && S.runtime_ready && fresh && airborne && performance.now() - lastOk <= 1000);
+  if (!S.runtime_ready) $('point_hint').textContent += ' Waiting for current flight telemetry.';
+  if (!airborne) $('point_hint').textContent += ' Available during an airborne Offboard hover.';
+}
+function selectPoint() {
+  const forward = Number.parseFloat($('point_forward').value), left = Number.parseFloat($('point_left').value);
+  draftPoint = Number.isFinite(forward) && Number.isFinite(left) ? {forward, left} : null;
+  renderPoint(); draw();
+}
+
+const finitePoint = p => Array.isArray(p) && p.length >= 3 && p.slice(0,3).every(Number.isFinite);
+function pathWithHeadings(points,headings) {
+  const out={points:[],headings:[]};
+  if (!Array.isArray(points)) return out;
+  points.forEach((p,i)=>{
+    if (!finitePoint(p)) return;
+    out.points.push(p);
+    out.headings.push(Array.isArray(headings)&&Number.isFinite(headings[i])?headings[i]:null);
+  });
+  return out;
+}
+function coursePaths() {
+  const course = S && S.course, a = course && course.anchor;
+  const anchored = a && a.valid && finitePoint(a.origin_enu) && Number.isFinite(a.yaw_rad);
+  const original = pathWithHeadings(anchored?course.original_world_enu:[],anchored?course.original_yaw_enu_rad:[]);
+  if (S&&S.obstacle_mode==='shadow') {
+    lastCoursePreview=null;
+    return {course,anchor:anchored?a:null,original:original.points,originalYaws:original.headings,
+            adjusted:[],adjustedYaws:[],adjustedStale:false,adjustedAge:null};
+  }
+  const adjustment = course && course.adjustment;
+  const now=performance.now(),elapsed=Math.max(0,(now-lastOk)/1000);
+  const age=adjustment&&Number.isFinite(adjustment.age_s)&&adjustment.age_s>=0?adjustment.age_s+elapsed:null;
+  const blocked=adjustment&&adjustment.status==='blocked';
+  const key=anchored&&course.preview_enabled===true&&hasVersion(course.original_version)?
+    JSON.stringify([course.original_version,a.origin_enu,a.yaw_rad,a.captured_wall_ns||null]):null;
+  if (!key||blocked||(lastCoursePreview&&lastCoursePreview.key!==key)) lastCoursePreview=null;
+  const fresh = anchored && course.preview_enabled!==false && !blocked && adjustment &&
+    ['unchanged','adjusted'].includes(adjustment.status) && lastOk && elapsed<=1 && age!==null && age<=1.5;
+  let adjusted=pathWithHeadings(fresh?course.adjusted_world_enu:[],fresh?course.adjusted_yaw_enu_rad:[]);
+  let adjustedStale=false,adjustedAge=age;
+  if (fresh&&key) {
+    lastCoursePreview=adjusted.points.length?{key,points:adjusted.points,headings:adjusted.headings,age,at:now}:null;
+  } else if (lastCoursePreview) {
+    const oldAge=lastCoursePreview.age+Math.max(0,(now-lastCoursePreview.at)/1000);
+    if (oldAge<=10) {
+      adjusted={points:lastCoursePreview.points,headings:lastCoursePreview.headings};
+      adjustedStale=true;adjustedAge=oldAge;
+    } else lastCoursePreview=null;
+  }
+  return {course,anchor:anchored?a:null,original:original.points,originalYaws:original.headings,
+          adjusted:adjusted.points,adjustedYaws:adjusted.headings,adjustedStale,adjustedAge};
+}
+
+function renderCourse() {
+  if (!S) return;
+  const view=coursePaths(), course=view.course, fc=S&&S.fc;
+  const shadow=S.obstacle_mode==='shadow';
+  $('course_planning').hidden=shadow;
+  $('course_adjusted_key').hidden=shadow;
+  const fresh=!!(S && S.you_own && lastOk && performance.now()-lastOk<=1000);
+  const grounded=fresh && S.pos && S.pos.valid && S.pos.age_s<=.5 &&
+    fc && fc.px4_link && fc.age_s<=1 && !fc.armed && fc.landed;
+  const launchReady=grounded&&(S.mode==='idle'||S.mode==='engaged')&&!S.was_offboard;
+  $('course_save').disabled=!fresh;
+  $('course_capture').disabled=!grounded;
+  const count=course && Number.isInteger(course.original_count) ? course.original_count :
+    course && Array.isArray(course.original_course) ? course.original_course.length : 0;
+  const loaded=!!(course && course.status!=='empty' && count>1);
+  if (course && courseImportLoaded!==loaded) {
+    $('course_import').open=!loaded;
+    courseImportLoaded=loaded;
+  }
+  $('course_import_label').textContent=loaded?'Replace route (optional)':'Import a route';
+  $('course_save').textContent=loaded?'Save replacement route':'Save route';
+  $('course_capture').disabled=!grounded||!loaded;
+  $('course_preview').disabled=!(fresh && view.anchor && count>1);
+  const run=S.course_run, running=!!(run&&run.active);
+  const launch=S.course_launch, queued=!!(launch&&launch.active), busy=running||queued;
+  const controller=S.course_controller;
+  const knownController=!!(controller&&courseControllerIds.includes(controller.selected));
+  const selected=knownController?controller.selected:'smooth_position';
+  const actual=running&&courseControllerIds.includes(run.controller)?run.controller:selected;
+  const options=controller&&Array.isArray(controller.options)?controller.options:[];
+  const selectedOption=options.find(option=>option&&option.id===selected);
+  const selectedSpeed=selectedOption&&Number.isFinite(selectedOption.speed_mps)?selectedOption.speed_mps:
+    selected==='smooth_position'?S.params.course_v_xy:null;
+  const courseSpeed=running?run.xy_speed_mps:selectedSpeed;
+  $('course_controller').value=selected;
+  $('course_controller').disabled=!grounded||busy||courseControllerPending||!knownController;
+  $('course_velocity_option').disabled=!(controller&&controller.available===true);
+  if (!courseOptionsPending) {
+    $('course_heading').value=(S.heading&&S.heading.policy==='path_tangent')?'path_tangent':'hold_start';
+    $('course_avoid').value=['avoid','ego'].includes(S.obstacle_mode)?S.obstacle_mode:'shadow';
+  }
+  $('course_heading').disabled=$('course_avoid').disabled=!grounded||busy||courseOptionsPending;
+  $('course_controller_status').textContent=(running ? `${courseControllerLabel(actual)} is active. Change follower after landing and disarming.` :
+    courseControllerPending ? 'Saving follower selection…' :
+    !knownController ? 'Waiting for follower selection from the server.' :
+    !grounded ? `${courseControllerLabel(selected)} selected. Changing follower requires control, fresh telemetry, landed and disarmed.` :
+    `${courseControllerLabel(selected)} selected.`)+
+    (controller&&controller.available!==true?' Velocity tracker unavailable: '+(controller.reason||'not available on this server'):'');
+  const waypointWindow=running?run.waypoint_acceptance_m:selectedOption&&selectedOption.waypoint_acceptance_m;
+  $('course_motion_limits').textContent=`${courseControllerLabel(actual)} · Course speed up to ${Number.isFinite(courseSpeed)?courseSpeed:'—'} m/s`+
+    (actual==='smooth_position'&&Number.isFinite(waypointWindow)?` · waypoint window ${Math.round(100*waypointWindow)} cm`:'')+
+    (S.heading&&Number.isFinite(S.heading.max_rate_dps)?` · turns up to ${S.heading.max_rate_dps}°/s`: '');
+  const airborne=fresh&&S.mode==='engaged'&&S.runtime_ready&&fc&&fc.px4_link&&fc.age_s<=1&&
+    fc.armed&&fc.offboard&&!fc.landed&&S.pos&&S.pos.valid&&S.pos.age_s<=.5;
+  const first=course&&course.original_world_enu&&course.original_world_enu[0];
+  const atStart=!!(first&&S.pos&&Math.hypot(S.pos.x-first[0],S.pos.y-first[1],S.pos.z-first[2])<=.15);
+  const radius=Number.parseFloat($('course_radius').value);
+  const controllerReady=selected!=='velocity_tracker'||controller.available===true;
+  const a=course&&course.adjustment;
+  // Checked preview fresh: fly it. Otherwise the planned route is flown with in-flight avoidance.
+  const planChecked=!shadow&&!!(a&&a.execution_supported&&['adjusted','unchanged'].includes(a.status)&&
+    Number.isFinite(a.age_s)&&a.age_s+Math.max(0,(performance.now()-lastOk)/1000)<=1.5&&view.adjusted.length>1);
+  const planReady=view.original.length>1;       // all modes: the saved route (EGO mode replans it in flight)
+  $('course_start').textContent=grounded?'Prepare course':'Start course';
+  $('course_start').disabled=!((launchReady||airborne&&atStart)&&view.anchor&&loaded&&planReady&&!busy&&controllerReady&&Number.isFinite(radius)&&radius>=.5&&radius<=20);
+  $('course_stop').disabled=!(fresh&&busy);
+  $('course_radius').disabled=busy;
+  $('course_preview').disabled=shadow||busy||$('course_preview').disabled;
+  $('course_clearance').disabled=$('course_offset').disabled=shadow||busy;
+  $('auto_course').disabled=!!(fc&&fc.armed);
+  $('arm').textContent=$('auto_course').checked?'ARM & fly course':'ARM';
+  $('arm').disabled=!(fresh&&S.live&&(!$('auto_course').checked||
+    launchReady&&S.ready&&planReady&&controllerReady&&Number.isFinite(radius)&&radius>=.5&&radius<=20));
+  $('course_run_status').textContent=queued ? launch.reason : running ?
+    `Course ${Math.round(run.progress*100)}% · ${run.path_time_s.toFixed(1)} / ${run.duration_s.toFixed(1)} s of path · ${run.reason}` :
+    run&&run.state==='complete' ? run.reason :
+    !controllerReady ? 'Velocity tracker is unavailable. Select Smooth position while landed and disarmed.' :
+    !view.anchor ? 'Set home / course start on the launch mark first.' :
+    !planReady ? 'Waiting for the saved route.' :
+    grounded ? (shadow || planChecked ? 'Ready: ARM takes off and starts the course automatically.'
+      : 'Ready: ARM flies the planned route; obstacles are handled in flight (no fresh pre-check).') :
+    !airborne ? 'Start requires a grounded launch or an airborne Offboard hover.' :
+    !atStart ? 'Return to the first course point, 1 m above home, before starting.' :
+    'Ready to request Start course. The server also checks that the hover is settled.';
+  $('fit_course').disabled=!view.anchor;
+  $('course_status').textContent = !course ? 'Checking the saved route…' : !loaded ?
+    'No route loaded.'+(course.reason?' '+course.reason:'') :
+    `Loaded: ${course.name || 'Course'} · ${count} waypoints · ${view.anchor ? 'home / course start set' : 'home / course start needed'}`;
+  $('course_next').textContent = !course ? 'The saved route loads automatically.' : !loaded ?
+    'Import a trajectory below to begin.' : view.anchor ?
+    (shadow?'ARM & fly course follows the saved route. Takeoff and course start are automatic.':
+      'Wait for the adjusted route, then ARM & fly course. Takeoff and course start are automatic.') :
+    S.you_own ? 'No JSON needed. Align the drone at the launch mark, then press Set home / course start.' :
+    'No JSON needed. Press Take control, then align the drone and press Set home / course start.';
+  $('course_adjusted_key').className='route-adjusted'+(view.adjustedStale?' route-stale':'');
+  $('course_adjustment').textContent = shadow ? 'The saved route is unchanged by depth observations.' :
+    view.adjustedStale ? `Last preview — stale, ${view.adjustedAge.toFixed(1)}s old`+(a&&a.reason?' · '+a.reason:'') :
+    !a ? '' : `Route: ${course.preview_enabled===false?'disabled':a.status}`+
+    (Number.isFinite(a.effective_clearance_m)?` · planned wall clearance ${a.effective_clearance_m.toFixed(2)} m`:'')+
+    (Number.isFinite(a.age_s) ? ` · ${(a.age_s+Math.max(0,(performance.now()-lastOk)/1000)).toFixed(2)} s old` : '')+
+    (a.reason ? ' · '+a.reason : '')+
+    (['adjusted','unchanged'].includes(a.status)&&!view.adjusted.length&&Array.isArray(course.adjusted_world_enu)&&course.adjusted_world_enu.length ? ' · hidden until fresh' : '');
+}
+
+function sharedHomeStart(view) {
+  return !!(view.anchor&&S.home&&Math.hypot(S.home.x-view.anchor.origin_enu[0],
+    S.home.y-view.anchor.origin_enu[1],S.home.z-view.anchor.origin_enu[2])<.02);
+}
+
+function depthView() {
+  const d = S && S.depth;
+  const elapsed = Math.max(0, (performance.now() - lastOk) / 1000);
+  const age = d && Number.isFinite(d.age_s) && d.age_s >= 0 ? d.age_s + elapsed : null;
+  let status = d ? d.status : 'waiting', reason = d ? d.reason || '' : '';
+  if (status === 'live' && (!lastOk || elapsed > 1 || age === null || age > 1.5)) {
+    status = 'stale'; reason = elapsed > 1 ? 'dashboard telemetry is stale' : 'waiting for a fresh depth frame';
+  }
+  const visible = status === 'live' && $('show_depth').checked;
+  const label = `${d && d.source || 'ML depth'} · ${status}${age === null ? '' : ' · ' + age.toFixed(2) + ' s old'}`;
+  $('depth_status').textContent = label + ($('show_depth').checked ? '' : ' · hidden') + (reason ? ' · ' + reason : '');
+  $('depth_status').className = 'small depth-status ' + (visible ? 'live' : '');
+  return {data:d, visible};
+}
+
+function drawDepth(g, view, X, Y, scale) {
+  if (!view.visible) return;
+  const d = view.data, point = p => Array.isArray(p) && p.length >= 2 && p.slice(0,2).every(Number.isFinite);
+  // The camera view is context only; it is never painted as free space.
+  const polygon = Array.isArray(d.view_polygon) ? d.view_polygon.filter(point) : [];
+  if (polygon.length >= 3) {
+    g.fillStyle = 'rgba(69,212,196,0.035)'; g.beginPath();
+    polygon.slice(0,16).forEach((p,i) => i ? g.lineTo(X(...p),Y(...p)) : g.moveTo(X(...p),Y(...p)));
+    g.closePath(); g.fill();
+  }
+  const cell = Number.isFinite(d.cell_m) && d.cell_m > 0 ? d.cell_m : .08;
+  const size = Math.max(2, Math.min(cell, .5) * scale);
+  g.fillStyle = 'rgba(69,212,196,0.65)';
+  const points = Array.isArray(d.points) ? d.points : [];
+  for (const p of points.slice(0,1600)) {
+    if (point(p)) g.fillRect(X(p[0],p[1])-size/2,Y(p[0],p[1])-size/2,size,size);
+  }
+}
+
+function makeMapView(W,H,course) {
+  const R=S.params.fence_r_m, engaged=S.mode==='engaged'||S.mode==='landing';
+  if (engaged) mapOrigin=[...S.engage_xy];
+  else if (S.home) mapOrigin=[S.home.x,S.home.y];
+  if (!mapOrigin&&S.pos.valid&&S.pos.age_s<=.5) mapOrigin=[S.pos.x,S.pos.y];
+  if (!mapOrigin) return null;
+  let [cx,cy]=mapOrigin, angle=S.home?S.home.yaw_deg*Math.PI/180:0;
+  let sc=W/(2*(R+.8)), fitted=false;
+  if ($('fit_course').checked&&course.anchor&&course.original.length) {
+    angle=course.anchor.yaw_rad;
+    const [ox,oy]=course.anchor.origin_enu,c=Math.cos(angle),s=Math.sin(angle);
+    const points=[...course.original,...course.adjusted,[ox,oy,0],[S.pos.x,S.pos.y,0]];
+    const local=points.map(p=>[(p[0]-ox)*c+(p[1]-oy)*s,-(p[0]-ox)*s+(p[1]-oy)*c]);
+    const fence=engaged?S.engage_xy:mapOrigin;
+    const fx=(fence[0]-ox)*c+(fence[1]-oy)*s,fy=-(fence[0]-ox)*s+(fence[1]-oy)*c;
+    local.push([fx-R,fy-R],[fx+R,fy+R]);
+    const forward=local.map(p=>p[0]),left=local.map(p=>p[1]);
+    const loF=Math.min(...forward),hiF=Math.max(...forward),loL=Math.min(...left),hiL=Math.max(...left);
+    const mf=(loF+hiF)/2,ml=(loL+hiL)/2,padding=Math.max(.5,Math.max(hiF-loF,hiL-loL)*.08);
+    cx=ox+mf*c-ml*s;cy=oy+mf*s+ml*c;
+    sc=Math.min(W/(hiL-loL+2*padding),H/(hiF-loF+2*padding));fitted=true;
+  }
+  const c=Math.cos(angle),s=Math.sin(angle);
+  return {scale:sc,angle,origin:[cx,cy],fitted,
+    X:(x,y)=>W/2-(-(x-cx)*s+(y-cy)*c)*sc,
+    Y:(x,y)=>H/2-((x-cx)*c+(y-cy)*s)*sc,
+    world:(px,py)=>{const f=(H/2-py)/sc,l=(W/2-px)/sc;return [cx+f*c-l*s,cy+f*s+l*c];}};
+}
+
+function drawCourse(g,view,X,Y) {
+  const route=(points,yaws,color,dashed)=>{
+    if (!points.length) return;
+    g.strokeStyle=color;g.lineWidth=2;g.setLineDash(dashed?[6,4]:[]);g.beginPath();
+    points.forEach((p,i)=>i?g.lineTo(X(p[0],p[1]),Y(p[0],p[1])):g.moveTo(X(p[0],p[1]),Y(p[0],p[1])));
+    g.stroke();g.setLineDash([]);
+    // Heading comes from the complete route, before display downsampling.
+    // Keep arrows sparse and small so they do not obscure the depth overlay.
+    const stride=Math.max(1,Math.ceil(points.length/12));let previous=null;
+    g.lineWidth=1.5;
+    for (let i=0;i<points.length-1;i+=stride) {
+      if (!Number.isFinite(yaws[i])) continue;
+      const p=points[i],px=X(p[0],p[1]),py=Y(p[0],p[1]);
+      if (previous&&Math.hypot(px-previous[0],py-previous[1])<36) continue;
+      const dx=X(p[0]+Math.cos(yaws[i]),p[1]+Math.sin(yaws[i]))-px;
+      const dy=Y(p[0]+Math.cos(yaws[i]),p[1]+Math.sin(yaws[i]))-py;
+      const length=Math.hypot(dx,dy);if (!length) continue;
+      const ux=dx/length,uy=dy/length,tx=px+5*ux,ty=py+5*uy;
+      g.beginPath();g.moveTo(px-5*ux,py-5*uy);g.lineTo(tx,ty);
+      g.moveTo(tx-4*ux+3*uy,ty-4*uy-3*ux);g.lineTo(tx,ty);
+      g.lineTo(tx-4*ux-3*uy,ty-4*uy+3*ux);g.stroke();
+      previous=[px,py];
+    }
+  };
+  if ($('show_course_original').checked) route(view.original,view.originalYaws,'#a5afbb',true);
+  if (S&&S.course_return&&S.course_return.world_enu) route(S.course_return.world_enu,[],'#f0883e',true);   // return hop
+  if ($('show_course_adjusted').checked) route(view.adjusted,view.adjustedYaws,view.adjustedStale?'#e5a84b':'#d2a8ff',view.adjustedStale);
+  { const e=S&&S.obstacle_mode==='ego'&&S.ego&&S.ego.status;   // EGO's live plan (bridge, 2 Hz)
+    if (e&&e.path&&e.path.length>1&&e.path_age_s!=null&&(e.path_age_s<3||S.ego.goal))   // dashed: EGO idle at its goal
+      route(e.path,[],'#3fb950',e.path_age_s>=3); }
+  if (view.anchor&&!sharedHomeStart(view)) {
+    const p=view.anchor.origin_enu,x=X(p[0],p[1]),y=Y(p[0],p[1]);
+    g.fillStyle='#a5afbb';g.beginPath();g.arc(x,y,3,0,2*Math.PI);g.fill();
+    g.font='11px ui-monospace,monospace';g.fillText('course start',x+6,y+14);
+  }
+}
+
+function draw() {
+  const cv = $('map'), g = cv.getContext('2d'), W = cv.width, H = cv.height;
+  g.clearRect(0, 0, W, H);
+  const depth = depthView();
+  mapView=null;
+  if (!S || !S.pos) return;
+  const R = S.params.fence_r_m, engaged = S.mode === 'engaged' || S.mode === 'landing';
+  const course=coursePaths();mapView=makeMapView(W,H,course);
+  if (!mapView) return;
+  const {X,Y,scale:sc,angle}=mapView;
+  $('map_frame').textContent=mapView.fitted?'Course view: +X is up; +Y is left.':'Home view: forward is up; left is left.';
+  g.strokeStyle = '#26303a'; g.lineWidth = 1;
+  const grid=Math.max(1,10**Math.floor(Math.log10(Math.max(W,H)/sc/8))),spacing=grid*sc;
+  for (let v=-Math.ceil(W/spacing/2);v<=Math.ceil(W/spacing/2);v++) {g.beginPath();g.moveTo(W/2+v*spacing,0);g.lineTo(W/2+v*spacing,H);g.stroke();}
+  for (let v=-Math.ceil(H/spacing/2);v<=Math.ceil(H/spacing/2);v++) {g.beginPath();g.moveTo(0,H/2-v*spacing);g.lineTo(W,H/2-v*spacing);g.stroke();}
+  drawDepth(g, depth, X, Y, sc);
+  drawCourse(g,course,X,Y);
+  { // avoidance zones (amber), marked holes (green), dry-run route and command (green)
+    const mw = S.course && S.course.marks_world;
+    if (mw) {
+      g.setLineDash([4, 4]); g.lineWidth = 1.5; g.strokeStyle = '#e3b341';
+      for (const z of mw.zones) { g.beginPath(); g.arc(X(z[0], z[1]), Y(z[0], z[1]), z[2] * sc, 0, 2 * Math.PI); g.stroke(); }
+      g.fillStyle = 'rgba(227,179,65,0.10)';
+      for (const poly of mw.polygons || []) {
+        g.beginPath(); poly.forEach((p, i) => i ? g.lineTo(X(p[0], p[1]), Y(p[0], p[1])) : g.moveTo(X(p[0], p[1]), Y(p[0], p[1])));
+        g.closePath(); g.fill(); g.stroke();
+      }
+      g.setLineDash([]); g.strokeStyle = '#3fb950'; g.lineWidth = 2;
+      for (const h of mw.holes) { const hx = X(h[0], h[1]), hy = Y(h[0], h[1]);
+        g.beginPath(); g.arc(hx, hy, 7, 0, 2 * Math.PI); g.moveTo(hx - 11, hy); g.lineTo(hx + 11, hy); g.moveTo(hx, hy - 11); g.lineTo(hx, hy + 11); g.stroke(); }
+    }
+    if (markMode === 'poly' && draftPoly.length) {   // polygon being drawn
+      g.setLineDash([2, 3]); g.strokeStyle = '#e3b341'; g.lineWidth = 2; g.beginPath();
+      draftPoly.forEach((p, i) => i ? g.lineTo(X(p[0], p[1]), Y(p[0], p[1])) : g.moveTo(X(p[0], p[1]), Y(p[0], p[1])));
+      g.stroke(); g.setLineDash([]); g.fillStyle = '#e3b341';
+      for (const p of draftPoly) { g.beginPath(); g.arc(X(p[0], p[1]), Y(p[0], p[1]), 4, 0, 2 * Math.PI); g.fill(); }
+    }
+    const d = S.dry_run;
+    if (d && d.state === 'running' && d.route && d.route.length > 1) {
+      g.setLineDash([]); g.strokeStyle = '#3fb950'; g.lineWidth = 2.5; g.beginPath();
+      d.route.forEach((p, i) => i ? g.lineTo(X(p[0], p[1]), Y(p[0], p[1])) : g.moveTo(X(p[0], p[1]), Y(p[0], p[1]))); g.stroke();
+      if (d.cmd && d.state === 'running') { g.fillStyle = '#3fb950'; g.beginPath(); g.arc(X(d.cmd[0], d.cmd[1]), Y(d.cmd[0], d.cmd[1]), 6, 0, 2 * Math.PI); g.fill(); }
+    }
+  }
+  g.strokeStyle = engaged ? '#e3b341' : '#3b4450'; g.setLineDash([6, 5]); g.lineWidth = 2;
+  const fence=engaged?S.engage_xy:mapOrigin;
+  g.beginPath(); g.arc(X(fence[0],fence[1]),Y(fence[0],fence[1]), R * sc, 0, 2 * Math.PI); g.stroke(); g.setLineDash([]);
+  if (engaged) {
+    g.strokeStyle = '#79c0ff'; g.lineWidth = 2; const tx = X(S.target[0], S.target[1]), ty = Y(S.target[0], S.target[1]);
+    g.beginPath(); g.moveTo(tx - 8, ty); g.lineTo(tx + 8, ty); g.moveTo(tx, ty - 8); g.lineTo(tx, ty + 8); g.stroke();
+    g.fillStyle = '#58a6ff'; g.beginPath(); g.arc(X(S.cmd[0], S.cmd[1]), Y(S.cmd[0], S.cmd[1]), 4, 0, 2 * Math.PI); g.fill();
+  }
+  if (draftPoint && S.home) {
+    const [x, y] = homeToWorld(draftPoint.forward, draftPoint.left);
+    g.strokeStyle = '#d2a8ff'; g.lineWidth = 2; g.setLineDash([3, 3]);
+    g.beginPath(); g.arc(X(x, y), Y(x, y), 9, 0, 2 * Math.PI); g.stroke(); g.setLineDash([]);
+  }
+  if (S.home) {
+    g.fillStyle = '#8b98a5'; g.font = '12px ui-monospace,monospace';
+    const shared=sharedHomeStart(course);
+    if (shared) {g.beginPath();g.arc(X(S.home.x,S.home.y),Y(S.home.x,S.home.y),3,0,2*Math.PI);g.fill();}
+    g.fillText(shared?'home / course start':'home', X(S.home.x, S.home.y) + 6, Y(S.home.x, S.home.y) - 8);
+  }
+  const px = X(S.pos.x, S.pos.y), py = Y(S.pos.x, S.pos.y), a = S.pos.yaw_deg * Math.PI / 180 - angle;
+  g.fillStyle = '#e6edf3'; g.beginPath(); g.arc(px, py, 7, 0, 2 * Math.PI); g.fill();
+  g.strokeStyle = '#e6edf3'; g.lineWidth = 3; g.beginPath(); g.moveTo(px, py); g.lineTo(px - 22 * Math.sin(a), py - 22 * Math.cos(a)); g.stroke();
+  g.fillStyle = '#8b98a5'; g.font = '12px ui-monospace,monospace'; g.fillText(`${grid} m grid`, 8, H - 8);
+}
+
+const STEP = 0.25, DZ = 0.1;
+const nudge = (fwd, right, up) => cmd('nudge', {fwd, right, up});
+const setHeight = op => {
+  if (!$('alt').reportValidity()) return;
+  cmd(op, {alt: Number.parseFloat($('alt').value)});
+};
+$('flight_mode').onchange = () => {
+  $('auto_course').checked=$('flight_mode').value!=='hover';
+  $('toast').textContent='';
+  renderFlight(); renderCourse();
+};
+$('flight_height').oninput = renderFlight;
+$('flight_launch').onclick = async () => {
+  const view=flightView();
+  if (!view.enabled) { renderFlight(); return; }
+  const extra={flight:view.flight};
+  if (view.op==='launch') {
+    if (view.flight==='hover') extra.alt=Number.parseFloat($('flight_height').value);
+    else extra.radius_m=Number.parseFloat($('course_radius').value);
+  }
+  launchPending=true;
+  $('toast').textContent='';
+  renderFlight();
+  try { await cmd(view.op,extra); }
+  finally { launchPending=false; renderFlight(); }
+};
+$('flight_launch_hop').onclick = async () => {
+  const view=flightView();
+  if (!view.enabled || view.op!=='launch') { renderFlight(); return; }
+  launchPending=true; $('toast').textContent=''; renderFlight();
+  try { await cmd('launch',{flight:'course',radius_m:Number.parseFloat($('course_radius').value),with_return:true}); }
+  finally { launchPending=false; renderFlight(); }
+};
+$('flight_hold').onclick = () => { renderFlight(); if (!$('flight_hold').disabled) return cmd('hold'); };
+$('flight_land').onclick = () => { renderFlight(); if (!$('flight_land').disabled) return cmd('land'); };
+$('flight_kill').onclick = () => { renderFlight(); if (!$('flight_kill').disabled) return cmd('disarm'); };
+$('claim').onclick = $('plan_claim').onclick = () => cmd('claim');
+$('arm').onclick = () => {
+  renderCourse();
+  if (!$('arm').disabled && (!$('auto_course').checked||$('course_radius').reportValidity()))
+    cmd('arm',{auto_course:$('auto_course').checked,radius_m:Number.parseFloat($('course_radius').value)});
+};
+$('auto_course').onchange = () => { $('flight_mode').value=$('auto_course').checked?'course':'hover'; renderCourse(); renderFlight(); };
+$('disarm').onclick = () => cmd('disarm');
+$('engage').onclick = () => setHeight('engage');
+$('setalt').onclick = () => setHeight('alt');
+$('point_forward').oninput = selectPoint; $('point_left').oninput = selectPoint;
+$('show_depth').onchange = draw;
+for (const id of ['show_course_original','show_course_adjusted','fit_course']) $(id).onchange=draw;
+$('course_save').onclick=()=>{
+  if ($('course_save').disabled) return;
+  try {
+    const trajectory=JSON.parse($('course_json').value);
+    if (!trajectory||typeof trajectory!=='object'||Array.isArray(trajectory)) throw new Error();
+    courseCmd('import',{trajectory});
+  } catch (e) {$('course_feedback').textContent='Paste a valid trajectory JSON object.';}
+};
+$('course_capture').onclick=()=>{if (!$('course_capture').disabled) courseCmd('capture_anchor');};
+$('course_controller').onchange=async()=>{
+  const selected=$('course_controller').value;
+  renderCourse(); // Recheck current telemetry and restore the last server selection.
+  if ($('course_controller').disabled||!courseControllerIds.includes(selected)||
+      (selected==='velocity_tracker'&&$('course_velocity_option').disabled)||
+      selected===S.course_controller.selected) return;
+  courseControllerPending=true;
+  renderCourse();
+  try { await courseCmd('controller',{controller:selected}); }
+  finally { courseControllerPending=false; renderCourse(); }
+};
+async function courseOption(key, el){
+  const value=el.value;
+  if (el.disabled) { renderCourse(); return; }
+  courseOptionsPending=true; renderCourse();
+  try { await courseCmd('options',{[key]:value}); }
+  finally { courseOptionsPending=false; renderCourse(); }
+}
+$('course_heading').onchange=()=>courseOption('heading_mode',$('course_heading'));
+$('course_avoid').onchange=()=>courseOption('obstacle_mode',$('course_avoid'));
+$('course_preview').onclick=()=>{
+  if ($('course_preview').disabled||!$('course_clearance').reportValidity()||!$('course_offset').reportValidity()) return;
+  courseCmd('preview',{clearance_m:Number.parseFloat($('course_clearance').value),max_offset_m:Number.parseFloat($('course_offset').value)});
+};
+$('point_form').onsubmit = e => {
+  e.preventDefault(); selectPoint();
+  if (!$('goto').disabled && draftPoint) cmd('goto', {...draftPoint});
+};
+$('map').onclick = e => {
+  if (!S || !S.home || !mapView) return;
+  const cv = $('map'), box = cv.getBoundingClientRect();
+  const world=mapView.world((e.clientX-box.left)*cv.width/box.width,(e.clientY-box.top)*cv.height/box.height);
+  if (markMode === 'poly') {
+    if (draftPoly.length >= 40) { $('marks_hint').textContent = 'A polygon zone has at most 40 corners: Finish or Undo.'; return; }
+    draftPoly.push([world[0], world[1]]); polyButtons(); draw(); return;
+  }
+  if (markMode) {   // placing a zone / hole instead of a go-to point
+    const kind = markMode; markMode = null;
+    markCmd({action: kind === 'zone' ? 'add_zone' : 'add_hole', x: world[0], y: world[1],
+      height_m: Number.parseFloat($('hole_height').value), radius_m: Number.parseFloat($('zone_radius').value)});
+    return;
+  }
+  const point = worldToHome(world[0],world[1]);
+  $('point_forward').value = point[0].toFixed(2); $('point_left').value = point[1].toFixed(2);
+  selectPoint();
+};
+const markCmd = async extra => {
+  const j = await courseCmd('marks', extra);
+  if (j) $('marks_hint').textContent = (j.ok ? '' : 'Refused: ') + (j.msg || '');
+  const m = S && S.course && S.course.marks;      // always show what the server actually has
+  if (m) $('zones_only').checked = !!m.zones_only;
+  return j;
+};
+const cancelMarkMode = why => { if (!markMode) return; markMode = null; draftPoly = []; polyButtons();
+  $('marks_hint').textContent = why || 'Map placement cancelled.'; draw(); };
+document.addEventListener('keydown', e => { if (e.key === 'Escape') cancelMarkMode(); });
+$('zones_only').onchange = () => markCmd({action: 'zones_only', zones_only: $('zones_only').checked});
+$('zone_here').onclick = () => markCmd({action: 'add_zone', at: 'drone', radius_m: Number.parseFloat($('zone_radius').value)});
+$('hole_here').onclick = () => markCmd({action: 'add_hole', at: 'drone'});
+$('zone_map').onclick = () => { if (markMode === 'zone') return cancelMarkMode();
+  markMode = 'zone'; $('marks_hint').textContent = 'Click the map where the zone should be centred (Esc or press again to cancel).'; };
+$('hole_map').onclick = () => { if (markMode === 'hole') return cancelMarkMode();
+  markMode = 'hole'; $('marks_hint').textContent = `Click the map at the hole; centre height ${$('hole_height').value} m above home (Esc or press again to cancel).`; };
+$('marks_clear').onclick = () => courseCmd('marks', {action: 'clear'});
+$('poly_start').onclick = () => { markMode = 'poly'; draftPoly = []; polyButtons(); };
+$('poly_undo').onclick = () => { draftPoly.pop(); polyButtons(); draw(); };
+$('poly_cancel').onclick = () => { markMode = null; draftPoly = []; polyButtons(); $('marks_hint').textContent = 'Polygon cancelled.'; draw(); };
+$('poly_finish').onclick = async () => {
+  if (draftPoly.length < 3) return;
+  const j = await markCmd({action: 'add_polygon', points: draftPoly});
+  if (j && j.ok) { markMode = null; draftPoly = []; polyButtons(); draw(); }   // refused: keep the draft
+};
+$('marks_list').onclick = e => { const b = e.target.closest('button[data-rm]'); if (b) courseCmd('marks', {action: 'remove_' + b.dataset.rm, index: Number(b.dataset.i)}); };
+$('dry_start').onclick = async () => {
+  const j = await courseCmd('dry_start', {radius_m: Number.parseFloat($('course_radius').value)});
+  dryMsg = j && !j.ok ? 'Refused: ' + (j.msg || 'dry run not started') : '';
+  if (dryMsg) $('dry_status').textContent = dryMsg;
+};
+$('dry_stop').onclick = () => courseCmd('dry_stop');
+$('fwd').onclick = () => nudge(STEP, 0, 0); $('back').onclick = () => nudge(-STEP, 0, 0);
+$('left').onclick = () => nudge(0, -STEP, 0); $('right').onclick = () => nudge(0, STEP, 0);
+$('up').onclick = () => nudge(0, 0, DZ); $('down').onclick = () => nudge(0, 0, -DZ);
+$('hold').onclick = () => $('flight_hold').onclick(); $('land').onclick = () => $('flight_land').onclick();
+$('course_start').onclick = () => {
+  renderCourse();
+  if (!$('course_start').disabled && $('course_radius').reportValidity())
+    courseCmd('start', {radius_m:Number.parseFloat($('course_radius').value)});
+};
+$('course_stop').onclick = () => {
+  if (!$('course_stop').disabled) courseCmd('stop');
+};
+$('course_radius').oninput = () => { renderCourse(); renderFlight(); };
+$('reset').onclick = () => cmd('reset'); $('release').onclick = () => cmd('release');
+document.addEventListener('keydown', e => {
+  if (['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName) || e.repeat) return;
+  if (e.target.tagName === 'BUTTON' && (e.key === ' ' || e.key === 'Enter')) return;
+  const k = e.key.toLowerCase();
+  if (!$('advanced').open) {
+    const simple={h:()=> $('flight_hold').onclick(),l:()=> $('flight_land').onclick(),' ':()=> $('flight_hold').onclick()};
+    if (simple[k]) { e.preventDefault(); simple[k](); }
+    return;
+  }
+  const map = {w: () => nudge(STEP, 0, 0), s: () => nudge(-STEP, 0, 0), a: () => nudge(0, -STEP, 0), d: () => nudge(0, STEP, 0),
+               r: () => nudge(0, 0, DZ), f: () => nudge(0, 0, -DZ), h: () => $('flight_hold').onclick(), l: () => $('flight_land').onclick(), ' ': () => $('flight_hold').onclick()};
+  if (map[k]) { e.preventDefault(); map[k](); }
+});
+// --- Plan / Fly tabs ---------------------------------------------------------------
+function showTab(name) {
+  for (const t of ['plan', 'fly']) {
+    $('panel_' + t).hidden = t !== name;
+    const tab = $('tab_' + t);
+    if (tab && typeof tab.setAttribute === 'function') tab.setAttribute('aria-selected', String(t === name));
+  }
+  try { localStorage.setItem('dash_tab', name); } catch (e) {}
+}
+$('tab_plan').onclick = () => showTab('plan');
+$('tab_fly').onclick = () => showTab('fly');
+let savedTab = 'fly';
+try { savedTab = localStorage.getItem('dash_tab') || 'fly'; } catch (e) {}
+showTab(savedTab === 'plan' ? 'plan' : 'fly');
+// Never leave flight controls hidden while armed.
+setInterval(() => { if (S && S.fc && S.fc.armed && $('panel_fly').hidden) showTab('fly'); }, 500);
+
+// --- planner output loader: path.bin / path.csv (PX4 NED at the pad) or course JSON --
+function planToDoc(name, buf) {
+  const lower = name.toLowerCase();
+  if (lower.endsWith('.json')) return JSON.parse(new TextDecoder().decode(buf));
+  let rows;
+  if (lower.endsWith('.bin')) {
+    const v = new DataView(buf);
+    if (buf.byteLength < 32 || String.fromCharCode(...new Uint8Array(buf, 0, 6)) !== 'DHPATH')
+      throw new Error('not a planner path.bin (DHPATH header missing)');
+    const cols = v.getUint32(12, true), n = Number(v.getBigUint64(16, true));
+    if (cols !== 12 || !(n >= 2) || 32 + n * cols * 8 > buf.byteLength) throw new Error('unexpected path.bin layout');
+    rows = [];
+    for (let i = 0; i < n; i++) { const o = 32 + i * cols * 8; rows.push([0, 1, 2, 3].map(k => v.getFloat64(o + k * 8, true))); }
+  } else if (lower.endsWith('.csv')) {
+    const lines = new TextDecoder().decode(buf).trim().split(/\r?\n/);
+    const head = lines[0].split(',').map(s => s.trim());
+    const ix = ['t', 'x', 'y', 'z'].map(k => head.indexOf(k));
+    if (ix.some(i => i < 0)) throw new Error('CSV needs t, x, y, z columns');
+    rows = lines.slice(1).filter(l => l.trim()).map(l => { const c = l.split(','); return ix.map(i => Number.parseFloat(c[i])); });
+  } else throw new Error('use path.bin, path.csv or a .json route');
+  if (rows.length < 2 || !rows.every(r => r.every(Number.isFinite))) throw new Error('file has missing or non-numeric values');
+  // Planner rows are PX4 local NED at the pad; the course frame is forward/left/up: [x, -y, -z].
+  const base = (name.replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9_-]+/g, '_').slice(0, 60)) || 'route';
+  return {version: 1, frame: 'course_flu', units: 'm', name: 'planner_' + base,
+          waypoints: rows.map(r => [r[1], -r[2], -r[3]]), times_s: rows.map(r => r[0])};
+}
+$('course_file').onchange = async () => {
+  const f = $('course_file').files && $('course_file').files[0];
+  if (!f) return;
+  try {
+    const doc = planToDoc(f.name, await f.arrayBuffer());
+    const w = Array.isArray(doc.waypoints) ? doc.waypoints : [];
+    let lo = Infinity, hi = -Infinity; for (const p of w) { lo = Math.min(lo, p[2]); hi = Math.max(hi, p[2]); }
+    const t = doc.times_s, dur = Array.isArray(t) && t.length > 1 ? t[t.length - 1] - t[0] : null;
+    $('course_json').value = JSON.stringify(doc);
+    $('course_import').open = true;
+    lastPlanDoc = doc; drawRoute3d(true);
+    $('course_file_status').textContent = `${f.name}: ${w.length} points` + (dur !== null ? `, ${dur.toFixed(1)} s` : '') +
+      (w.length ? `, height ${lo.toFixed(2)}–${hi.toFixed(2)} m` : '') + '. Check it, then press Load route.';
+  } catch (e) { $('course_file_status').textContent = 'Could not read ' + f.name + ': ' + e.message; }
+};
+
+// --- 3D course view, drawn like the planner app ------------------------------------
+// Course-frame route (forward/left/up from the pad) -> planner map frame with the pad pose:
+// map = (c*f - s*l + px, s*f + c*l + py, u + pz). Colour = speed, like planner/web.
+let lastPlanDoc = null;
+const view3d = {th: null, loading: null, scene: null, camera: null, renderer: null, controls: null,
+  course: null, route: null, pad: null, drone: null, path: null, playing: false, last: 0};
+const THREE_URL = 'https://cdn.jsdelivr.net/npm/three@0.160.0';
+function v3num(id, fallback = 0) { const n = Number.parseFloat($(id).value); return Number.isFinite(n) ? n : fallback; }
+function loadThree() {
+  if (!view3d.loading) view3d.loading = (async () => {
+    const add = p => import(`${THREE_URL}/examples/jsm/${p}/+esm`);
+    const [T, oc, l2, lm, lg, stl, obj, ply] = await Promise.all([import(`${THREE_URL}/+esm`),
+      add('controls/OrbitControls.js'), add('lines/Line2.js'), add('lines/LineMaterial.js'),
+      add('lines/LineGeometry.js'), add('loaders/STLLoader.js'), add('loaders/OBJLoader.js'), add('loaders/PLYLoader.js')]);
+    return {T, OrbitControls: oc.OrbitControls, Line2: l2.Line2, LineMaterial: lm.LineMaterial,
+      LineGeometry: lg.LineGeometry, STLLoader: stl.STLLoader, OBJLoader: obj.OBJLoader, PLYLoader: ply.PLYLoader};
+  })();
+  return view3d.loading;
+}
+async function init3d() {
+  if (view3d.scene) return true;
+  $('view3d_status').textContent = 'loading 3D…';
+  try { view3d.th = await loadThree(); }
+  catch (e) { view3d.loading = null; $('view3d_status').textContent = '3D view needs internet to load three.js'; return false; }
+  const {T, OrbitControls} = view3d.th, box = $('view3d');
+  const renderer = new T.WebGLRenderer({antialias: true});
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  box.replaceChildren(renderer.domElement);
+  const scene = new T.Scene(); scene.background = new T.Color(0x080b0e);
+  const camera = new T.PerspectiveCamera(45, 1, 0.01, 500); camera.up.set(0, 0, 1); camera.position.set(-8, -10, 8);
+  const controls = new OrbitControls(camera, renderer.domElement); controls.enableDamping = true;
+  scene.add(new T.HemisphereLight(0xffffff, 0x334455, 1.6));
+  const sun = new T.DirectionalLight(0xffffff, 1.4); sun.position.set(5, -8, 12); scene.add(sun);
+  const grid = new T.GridHelper(20, 20, 0x3a4350, 0x1d242c); grid.rotation.x = Math.PI / 2; scene.add(grid);
+  scene.add(new T.AxesHelper(1));   // x red, y green, z blue
+  const drone = new T.Mesh(new T.SphereGeometry(0.09, 20, 14), new T.MeshStandardMaterial({color: 0xffffff, emissive: 0x444444}));
+  drone.visible = false; scene.add(drone);
+  Object.assign(view3d, {scene, camera, renderer, controls, drone});
+  const resize = () => {
+    const w = box.clientWidth || 600, h = box.clientHeight || 460;
+    renderer.setSize(w, h, false); renderer.domElement.style.width = '100%'; renderer.domElement.style.height = '100%';
+    camera.aspect = w / h; camera.updateProjectionMatrix();
+    if (view3d.route) view3d.route.material.resolution.set(w, h);
+  };
+  resize(); if (typeof ResizeObserver === 'function') new ResizeObserver(resize).observe(box);
+  const frame = now => {
+    requestAnimationFrame(frame);
+    if (view3d.playing && view3d.path) {
+      let t = Number.parseFloat($('view3d_t').value) + (now - view3d.last) / 1000; view3d.last = now;
+      const end = view3d.path.t[view3d.path.t.length - 1];
+      if (t >= end) { t = end; view3d.playing = false; $('view3d_play').textContent = 'Play'; }
+      setT3d(t);
+    }
+    controls.update(); renderer.render(scene, camera);
+  };
+  requestAnimationFrame(frame);
+  $('view3d_status').textContent = '';
+  return true;
+}
+function frame3d() {
+  const {T} = view3d.th, b = new T.Box3();
+  for (const o of [view3d.course, view3d.route, view3d.pad]) if (o) b.expandByObject(o);
+  if (b.isEmpty()) return;
+  const c = b.getCenter(new T.Vector3()), e = Math.max(1, b.getSize(new T.Vector3()).length());
+  view3d.controls.target.copy(c); view3d.camera.position.set(c.x - .55 * e, c.y - .75 * e, c.z + .7 * e);
+}
+function drawRoute3d(reframe = false) {
+  if (!view3d.scene) return;
+  const {T, Line2, LineMaterial, LineGeometry} = view3d.th, sc = view3d.scene;
+  for (const k of ['route', 'pad']) if (view3d[k]) { sc.remove(view3d[k]); view3d[k] = null; }
+  const saved = S && S.course && Array.isArray(S.course.original_course) ? S.course.original_course : [];
+  const src = lastPlanDoc && Array.isArray(lastPlanDoc.waypoints) && lastPlanDoc.waypoints.length > 1
+    ? {pts: lastPlanDoc.waypoints, t: lastPlanDoc.times_s, label: lastPlanDoc.name || 'loaded file'}
+    : saved.length > 1 ? {pts: saved, t: null, label: (S.course.name || 'saved route')} : null;
+  const h = v3num('pad_heading') * Math.PI / 180, c = Math.cos(h), s = Math.sin(h);
+  const px = v3num('pad_x'), py = v3num('pad_y'), pz = v3num('pad_z');
+  const pad = new T.Group();
+  pad.add(new T.ArrowHelper(new T.Vector3(c, s, 0), new T.Vector3(px, py, pz + .02), 0.6, 0x3ccf7a, 0.18, 0.1));
+  const ring = new T.Mesh(new T.RingGeometry(.12, .16, 32), new T.MeshBasicMaterial({color: 0x3ccf7a, side: T.DoubleSide}));
+  ring.position.set(px, py, pz + .01); pad.add(ring); sc.add(pad); view3d.pad = pad;
+  if (!src) { $('view3d_status').textContent = 'no route yet: load planner output above'; if (reframe) frame3d(); return; }
+  const pos = src.pts.map(p => [c * p[0] - s * p[1] + px, s * p[0] + c * p[1] + py, p[2] + pz]);
+  const times = Array.isArray(src.t) && src.t.length === pos.length ? src.t : null;
+  const speed = pos.map((p, i) => i && times ? Math.hypot(p[0] - pos[i-1][0], p[1] - pos[i-1][1], p[2] - pos[i-1][2]) / Math.max(1e-6, times[i] - times[i-1]) : 0);
+  if (times && speed.length > 1) speed[0] = speed[1];
+  let vmax = 0.01; for (const v of speed) vmax = Math.max(vmax, v);
+  const flat = [], col = [], k = new T.Color();
+  pos.forEach((p, i) => { flat.push(p[0], p[1], p[2]); k.setHSL(times ? (1 - speed[i] / vmax) * .64 : .78, .9, times ? .52 : .7); col.push(k.r, k.g, k.b); });
+  const geo = new LineGeometry(); geo.setPositions(flat); geo.setColors(col);
+  const mat = new LineMaterial({vertexColors: true, linewidth: 4, worldUnits: false});
+  mat.resolution.set($('view3d').clientWidth || 600, $('view3d').clientHeight || 460);
+  const line = new Line2(geo, mat); line.computeLineDistances(); sc.add(line); view3d.route = line;
+  view3d.path = {pos, t: times || pos.map((_, i) => i * .05), speed};
+  $('view3d_play_row').hidden = false; $('view3d_legend').hidden = !times;
+  $('view3d_vmax').textContent = vmax.toFixed(2);
+  $('view3d_t').max = String(view3d.path.t[view3d.path.t.length - 1]); $('view3d_t').step = '0.01';
+  $('view3d_status').textContent = `${src.label} · ${pos.length} points` + (times ? '' : ' · saved route has no timing, shown in one colour');
+  setT3d(0);
+  if (reframe) frame3d();
+}
+function setT3d(t) {
+  const p = view3d.path; if (!p) return;
+  let lo = 0, hi = p.t.length - 1;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (p.t[m] < t) lo = m + 1; else hi = m; }
+  const q = p.pos[lo]; view3d.drone.position.set(q[0], q[1], q[2]); view3d.drone.visible = true;
+  $('view3d_t').value = String(t);
+  $('view3d_info').textContent = `t ${p.t[lo].toFixed(2)} / ${p.t[p.t.length - 1].toFixed(2)} s · ${p.speed[lo].toFixed(2)} m/s · height ${(q[2] - v3num('pad_z')).toFixed(2)} m`;
+}
+async function loadCourse3d(f) {
+  if (!await init3d()) return;
+  const {T, STLLoader, OBJLoader, PLYLoader} = view3d.th, buf = await f.arrayBuffer(), lower = f.name.toLowerCase();
+  let obj;
+  if (lower.endsWith('.bin')) {      // planner map.bin (DHMAP): occupied points, already in the map frame
+    const v = new DataView(buf);
+    if (buf.byteLength < 24 || String.fromCharCode(...new Uint8Array(buf, 0, 5)) !== 'DHMAP') throw new Error('not a planner map.bin (DHMAP)');
+    const n = Number(v.getBigUint64(16, true));
+    if (24 + n * 12 > buf.byteLength) throw new Error('map.bin is truncated');
+    const xyz = new Float32Array(buf.slice(24, 24 + n * 12)), col = new Float32Array(n * 3), k = new T.Color();
+    let zlo = Infinity, zhi = -Infinity; for (let i = 2; i < xyz.length; i += 3) { zlo = Math.min(zlo, xyz[i]); zhi = Math.max(zhi, xyz[i]); }
+    for (let i = 0; i < n; i++) { k.setHSL(.58, .12, .32 + .4 * (xyz[3*i+2] - zlo) / Math.max(.01, zhi - zlo)); col.set([k.r, k.g, k.b], 3 * i); }
+    const g = new T.BufferGeometry(); g.setAttribute('position', new T.BufferAttribute(xyz, 3)); g.setAttribute('color', new T.BufferAttribute(col, 3));
+    obj = new T.Points(g, new T.PointsMaterial({size: .03, vertexColors: true}));
+  } else {
+    let geo;
+    if (lower.endsWith('.stl')) geo = new STLLoader().parse(buf);
+    else if (lower.endsWith('.ply')) geo = new PLYLoader().parse(buf);
+    else if (lower.endsWith('.obj')) { const grp = new OBJLoader().parse(new TextDecoder().decode(buf)); grp.traverse(o => { if (!geo && o.isMesh) geo = o.geometry; }); }
+    else throw new Error('use map.bin, .stl, .obj or .ply');
+    if (!geo) throw new Error('no mesh found in ' + f.name);
+    geo.computeBoundingBox(); const size = geo.boundingBox.getSize(new T.Vector3()), ext = Math.max(size.x, size.y, size.z);
+    let scale = Number.parseFloat($('mesh_scale').value);
+    if (!Number.isFinite(scale) || scale <= 0) { scale = ext > 1000 ? .001 : ext > 60 ? .0254 : 1; $('mesh_scale').value = String(scale); }
+    const yaw = v3num('mesh_yaw') * Math.PI / 180, m = new T.Matrix4().makeTranslation(v3num('mesh_tx'), v3num('mesh_ty'), v3num('mesh_tz'));
+    m.multiply(new T.Matrix4().makeRotationZ(yaw));
+    if ($('mesh_up').value === 'y') m.multiply(new T.Matrix4().set(1,0,0,0, 0,0,-1,0, 0,1,0,0, 0,0,0,1));
+    m.multiply(new T.Matrix4().makeScale(scale, scale, scale));
+    geo.applyMatrix4(m); geo.computeVertexNormals();
+    obj = new T.Group();
+    obj.add(new T.Mesh(geo, new T.MeshStandardMaterial({color: 0x9aa5b4, roughness: .85, metalness: 0, side: T.DoubleSide, flatShading: true})));
+    if (geo.index ? geo.index.count < 600000 : geo.attributes.position.count < 600000)
+      obj.add(new T.LineSegments(new T.EdgesGeometry(geo, 25), new T.LineBasicMaterial({color: 0x2b3038})));
+  }
+  if (view3d.course) view3d.scene.remove(view3d.course);
+  view3d.course = obj; view3d.scene.add(obj);
+  drawRoute3d(); frame3d();
+}
+$('mesh_file').onchange = async () => {
+  const f = $('mesh_file').files && $('mesh_file').files[0]; if (!f) return;
+  try { await loadCourse3d(f); } catch (e) { $('view3d_status').textContent = 'Could not load ' + f.name + ': ' + e.message; }
+};
+$('plan_cfg_file').onchange = async () => {
+  const f = $('plan_cfg_file').files && $('plan_cfg_file').files[0]; if (!f) return;
+  const text = await f.text(), grab = key => { const m = text.match(new RegExp('^\\s*' + key + '\\s*:\\s*([^#\\n]+)', 'm')); return m ? m[1].trim() : null; };
+  const start = grab('StartPos'), heading = grab('StartHeadingDeg');
+  const xyz = start ? start.replace(/[\[\]]/g, '').split(',').map(Number.parseFloat) : [];
+  if (xyz.length === 3 && xyz.every(Number.isFinite)) { $('pad_x').value = String(xyz[0]); $('pad_y').value = String(xyz[1]); $('pad_z').value = String(xyz[2]); }
+  const hd = heading ? Number.parseFloat(heading.replace(/[\[\]]/g, '')) : NaN;
+  if (Number.isFinite(hd)) $('pad_heading').value = String(hd);
+  $('view3d_status').textContent = xyz.length === 3 ? `pad from ${f.name}` : `no StartPos in ${f.name}`;
+  if (await init3d()) drawRoute3d(true);
+};
+$('view3d_open').onclick = async () => { if (await init3d()) drawRoute3d(true); };
+for (const id of ['pad_x', 'pad_y', 'pad_z', 'pad_heading']) $(id).onchange = () => drawRoute3d();
+$('view3d_t').oninput = () => setT3d(Number.parseFloat($('view3d_t').value));
+$('view3d_play').onclick = () => {
+  if (!view3d.path) return;
+  view3d.playing = !view3d.playing; view3d.last = performance.now(); $('view3d_play').textContent = view3d.playing ? 'Pause' : 'Play';
+  if (view3d.playing && Number.parseFloat($('view3d_t').value) >= view3d.path.t[view3d.path.t.length - 1] - 1e-6) setT3d(0);
+};
+
+setInterval(poll, 100);
+let depthViewBusy = false;
+async function refreshDepthView() {
+  if (depthViewBusy || (typeof document !== 'undefined' && document.hidden)) return;
+  depthViewBusy = true;
+  try {
+    const r = await fetch(`/api/depth.jpg?k=${encodeURIComponent(K)}`, {cache: 'no-store'});
+    if (!r || !r.ok) { $('depth_view_age').textContent = '(no image yet)'; return; }
+    const age = Number.parseFloat(r.headers && r.headers.get ? r.headers.get('X-Age-S') : NaN);
+    const url = URL.createObjectURL(await r.blob());
+    const img = $('depth_view'), old = img.src || '';
+    img.src = url;
+    if (old.startsWith('blob:')) URL.revokeObjectURL(old);
+    $('depth_view_age').textContent = Number.isFinite(age) && age > 2 ? `(stale ${age.toFixed(0)} s)` : '';
+  } catch (e) {
+    $('depth_view_age').textContent = '(not delivered)';
+  } finally { depthViewBusy = false; }
+}
+setInterval(refreshDepthView, 500);
+function watchdog() {
+  const lost = lastOk && performance.now() - lastOk > 1000;
+  $('linklost').style.display = lost ? 'block' : 'none';
+  if (lost) $('goto').disabled = true;
+  renderCourse();
+  renderFlight();
+  // Redraw locally too, so a stalled HTTP feed cannot leave old surfaces visible.
+  if (S && (S.depth || S.course)) draw();
+}
+setInterval(watchdog, 100);
+poll();
+</script>

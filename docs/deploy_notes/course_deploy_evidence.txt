@@ -1,0 +1,1 @@
+/root/team_ws/claude/mavlink_usb/course_deploy_20261108T014712Z

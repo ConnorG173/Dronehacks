@@ -1,0 +1,45 @@
+Continuous course steering and faster settings — deployed 2026-11-08 UTC
+
+Running settings, also verified after the subsequent user reboot:
+- Course horizontal target speed: 1.2 m/s (previously 1.0).
+- Commanded yaw rate: up to 90 degrees/s (previously 60).
+- Commanded yaw acceleration: up to 180 degrees/s^2 (previously 120).
+- Manual Go/nudge remains 1.0 m/s; vertical remains 0.3 m/s.
+- Original 1,394-point route remains loaded. Home must be captured after reboot.
+
+After one initial measured alignment, the course uses a retargetable yaw
+controller that preserves angular velocity as the tangent changes. Translation
+and turning run together. Smooth clock pacing between 5 and 10 degrees of
+heading error slows the route through bends. The 10-degree movement gate,
+30 cm command lead, 20 cm tracking pause and 50 cm course-error trip remain.
+Tracking pauses preserve the yaw controller; automatic completion waits for
+its last turn to finish smoothly. Manual Hold/stop behavior remains explicit.
+Yaw and angular velocity are continuous; acceleration is bounded but is not
+jerk limited. Real physical tracking and motor outputs are not guaranteed by
+these command bounds. Native PX4 flight parameters were not changed.
+
+Only the dashboard process was refreshed for deployment. No arm or flight
+movement command was sent. The user subsequently rebooted: systemd service
+skybeta-stack is active and enabled; all four launch panes are running.
+USB flight telemetry, VIO tracking, dashboard and Depth Anything overlay are
+fresh. Boot readback showed disarmed/landed, ready with no blockers, and 71%
+battery. The 1.2 m/s / 90 deg/s / continuous settings survived reboot.
+
+Validation: 33 controller/course tests, 35 isolated ROS domain 221 API/motion/
+readiness/yaw-wire tests, and 26 mocked-browser tests passed. The endpoint
+regression includes a slow tight arc and post-completion holding.
+Sixteen full-route before/after synthetic comparisons passed bounds, including
+post-completion ticks. Ideal model: 86.5 -> 32.7 seconds. Illustrative P=2.8 yaw
+lag model: 97.8 -> 47.2 seconds, without repeated turn/settle pauses. Larger
+position lag can still trigger the existing catch-up pauses. These numbers
+are synthetic checks, not measured flight performance or timing promises.
+The depth-adjusted purple route remains preview-only; Start course executes
+the original route. No hardware flight test of this update was performed.
+
+Code and reproducible benchmark:
+/home/dronehacks/team_ws/claude/course_faster_candidate_20261108T030216Z/
+Deployment backup, ground guards, hashes, completion correction and boot checks:
+/home/dronehacks/team_ws/claude/course_faster_deploy_20261108T030916Z/
+
+Update 2026-11-08 03:35 UTC: Smooth position accepts intermediate pending targets within 0.05 m of the commanded position. Early acceptance requires translation/heading permission; the final target and measured settling checks remain. Existing 1.2 m/s course cap, 20 cm tracking pause, 30 cm command lead and heading gates retained. Velocity tracker unchanged. UI/state report waypoint window 5 cm. This does not guarantee 5 cm physical tracking.
+Dashboard-only landed/disarmed deploy: 3466 -> 4147. USB 534 and interface 3423 unchanged. API reports smooth_position, waypoint_acceptance_m=0.05, ready/runtime_ready true, no blockers, no competing publishers. Home needs recapture. Python parse check only; no additional test suites or flight commands. Speed improvement not measured. Evidence: /home/dronehacks/team_ws/claude/position_5cm_candidate_20261108T033435Z/.

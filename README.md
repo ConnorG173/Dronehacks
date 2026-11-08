@@ -1,132 +1,80 @@
-# takeoff_land
+# DroneHacks · skybeta-12
 
-This is a complete editable companion flight project. New lab workspaces receive
-these ordinary Python files and their configuration automatically. Copy the full
-project and declare its dependencies when preparing hardware deployment.
+From a course CAD file to an autonomous indoor flight: a GCOPTER planner turns the mesh into a
+time-optimal, validated trajectory, and the drone's flight dashboard flies it on PX4 with live
+depth-based route checking.
 
-Open **FLIGHT_CODE.md** for the source map. `main.py` starts the local `refnav/`
-package: edit `refnav/core.py` for the climb, hover, navigation and landing
-decisions, `refnav/node.py` for the ROS 2/PX4 interface, and `refnav/depth.py` for
-depth processing. Run `python3 -m pytest -q tests` for the local decision tests.
-Run **main.py** after editing helpers; reset after a previous run:
+```
+ course CAD (STEP/STL)          planner/                       flight/  (on the drone)
+ ───────────────────▶  mesh → occupancy map → RRT per leg  ──▶  dashboard: anchor at the launch
+   + start, checkpoints        → safe corridor → GCOPTER         mark, follow the trajectory,
+     and goal                  → validate → path.csv / .bin      check it against Depth Anything
+                                     │                            depth, PX4 Land, return hop
+                                     ▼
+                               tools/path_editor.html  (optional hand edits, same format)
+```
+
+## Quick start
+
+Everything runs from one [pixi](https://pixi.sh) environment (Python, CadQuery, CMake, Eigen, OMPL):
 
 ```sh
-python3 main.py
+pixi run planner-web   # 1. upload the course CAD, place checkpoints, plan  → http://127.0.0.1:8765
+pixi run editor        # 2. optional: drag the planned path, export CSV
+pixi run demo          # 3. the flight dashboard against a recorded flight  → http://127.0.0.1:8099/?k=demo
+pixi run test          # flight logic tests that need no ROS (166 tests)
+pixi run test-planner  # planner tests: upstream parity, checkpoints, file format
 ```
 
-Plain Python directly starts the local ROS node, like on a real companion; it
-does not submit a lab operation. The optional workbench Run button
-snapshot your project and provide admission, recording and independent grading.
-Direct terminal programs need their own recorder, such as `ros2 bag record`.
-Use Reset simulation in the Session UI when you need a fresh simulated vehicle.
-The cloud companion also provides `python` as Python 3 when no interpreter of
-that name has already been installed. Outside the cloud, use the reviewed
-local/hardware deployment configuration. This source imports no runtime library:
-`flight.yaml`, `route.json` and `refnav/launch.py` are ordinary editable files.
-`/etc/flyx/mission.yaml` (or `DRONE_PARAMS_FILE`) may supply the deployment's ROS
-parameters. The hardware default clock is system time; simulation deployment
-selects simulated time. Both use the native topic/frame contract documented in
-`docs/NATIVE_DRONE_INTERFACE.md` in the toolkit. Physical launch is not qualified.
+`pixi run plan` plans the course-v3 mission headless from `planner/config/course_v3.yaml`.
 
-The initial algorithm is copied unchanged from the maintained reference package.
-Its earlier baseline flew on the rig on 2026-10-18 (docs/CURRENT_STATE.md); the
-workspace packaging change is separate from moving-flight qualification.
+## 1 · Mesh → trajectory (`planner/`)
 
-`onboard/` contains the actual editable cuVSLAM, vision bridge, health/odometry
-nodes, launch configuration and process manager. See `onboard/README.md`.
-`python3 onboard/services.py status` names the running source and log files;
-stop/start explicitly after editing perception code. Startup never arms.
+A standalone C++ program around [GCOPTER](https://github.com/ZJU-FAST-Lab/GCOPTER) (vendored,
+12 of 13 headers byte-identical to upstream; two documented fixes in `geo_utils.hpp`). It voxelises
+the course, finds an RRT route per leg through every checkpoint box, builds a convex safe corridor
+and optimises a minimum-time trajectory under speed, tilt, thrust and body-rate limits. Every
+result is re-checked at 1 ms; a failed plan writes no file. Output: `path.csv` / `path.bin`
+(100 Hz, PX4 local NED at the pad) and `route.txt` (map frame). Config keys, formats and frames:
+`planner/README.md`. The web front end (`planner/web/`) converts STEP files, shows the course in
+3D, streams the planner's progress and draws the RRT routes as they are found.
 
----
+## 2 · Trajectory → drone (`tools/`)
 
-# Team project: planner + path follower
+| | |
+|---|---|
+| `path_editor.html` | Drag a planned path (top view and height profile), timing kept, CSV out |
+| `upload_course.sh` | Upload an edited CSV to the drone as the course (checks start/end moved) |
+| `convert_hop.py` | Put a second plan (a return hop) into the first course's frame via the shared map frame |
+| `import_path.py`, `import_return.py` | The dashboard API calls behind the two above |
+| `dashboard_demo.py` | Serves the real dashboard page with a recorded state; no drone needed |
 
-*(Everything above this line is the lab's text and is left unchanged. This section is ours.)*
+## 3 · Fly (`flight/`)
 
-```
-planner/            C++ GCOPTER + OMPL planner: course map + checkpoints -> path.bin (no ROS)
-  src/ CMakeLists.txt config/course_v3.yaml maps/course_v3.bin tests/ third_party/gcopter/ tools/
-localizer/          ROS 2 ament_python package "localizer": flies path.bin
-  localizer/core/   the follower: plain Python + numpy, NO ROS (path, frames, PathClock, fence,
-                    state machine). Both adapters run exactly this code.
-  localizer/sim.py  simulator adapter: px4_msgs, /fmu/in/* direct, full feedforward, arms itself
-                    only with --i-have-team-approval, lands with NAV_LAND
-  localizer/real.py real-drone adapter (skybeta): publishes only /skybeta/setpoint/pose (the lead
-                    point), preview topic by default, never arms
-  launch/ data/course_v3_path.bin test/ HALF_ASSED.md (known shortcuts)
-dronehacks-course-v3.step   course CAD (source of planner/maps/course_v3.bin)
-```
+What runs on skybeta-12 (Jetson Orin, ROS 2 Humble, PX4 over USB MAVLink, cuVSLAM VIO):
 
-The planner turns the course CAD and an ordered list of checkpoints into one time-sampled,
-validated trajectory: `path.bin`, PX4 local NED at the launch pad, sampled every 0.01 s (format
-in `planner/README.md`). The follower core loads it into the course frame and computes, every
-50 ms, where the vehicle should be. Its inputs are the vehicle's pose and its armed/Offboard/landed
-state; its outputs are p, v, a, yaw and an on-path lead point q. It runs the run's state machine:
-pad init, takeoff, follow with a time-governed path clock, hold on fault, and a land request at the
-end. The adapters only translate ROS messages to and from those dataclasses. Where the simulator and
-the drone differ (QoS, clock, feedforward vs lead point, who arms, how a run ends), the difference
-is an adapter choice or a `Config` value, never a branch in the core.
+| | |
+|---|---|
+| `dash/` | Flight dashboard and autopilot: web UI, course following (position or velocity follower), heading control, obstacle guard and in-flight replanning, hole centring, dry run, course + return hop |
+| `depth_overlay/` | Depth Anything V2, scaled to metres every frame from stereo; 8 cm obstacle cells per 20 cm height slab |
+| `mavlink_usb/` | The single USB MAVLink owner: setpoints, vision, telemetry; an allow-list of operator commands (arm, disarm, Offboard, PX4 Land) |
+| `startup/` | Launch files the stack boots with; cuVSLAM camera config |
+| `ego/` | Optional EGO-Planner integration (separate container) |
+| `courses/` | The routes flown, as planned and as uploaded |
 
-## Run in the simulator
+A flight: set home on the launch mark, press **Take off**. The dashboard climbs, follows the
+trajectory on its own clock, checks every command against fresh depth, and lands with PX4 Land.
+With **course + return hop** it flies a second plan from where it landed. Safety: once airborne,
+nothing on the laptop side holds the flight (`DashParams.no_holds`); the RC kill, the dashboard
+kill, RC takeover, disarm or lost PX4 position/link stop it.
 
-Preconditions, every time: **the team has approved this mission**. Keyboard RC landed and released,
-then **Reset world** in the Session UI. Nothing else is flying (no `main.py` or notebook mission). The
-VIO services are running (`python3 onboard/services.py status`; PX4 refuses position-controlled
-arming without them). The spawn pose matches the course start (-2.51, 0.91), heading +x: check it
-with `python3 SIM_SENSOR_EXAMPLE.py`. The follower assumes it starts on the launch mark.
+Tests: `pixi run test` covers the flight logic (course following, replanning, hole control, return
+hop, depth geometry). Twelve more modules (`test_motion`, `test_ui`, `test_readiness`, …) need ROS
+and `px4_msgs` and run on the drone: `python3 -m unittest discover -p "test_*.py"` in `flight/dash`.
 
-In the companion terminal (Workbench, Ctrl+`), from the workspace `/var/lib/flyx-lab/workspace`:
+## Also in this repository
 
-```sh
-cd localizer
-python3 -m localizer.sim                           # passive: creates no publisher, only logs
-python3 -m localizer.sim --i-have-team-approval    # arms, takes off, flies the path, lands
-```
-
-With the flag it also refuses to start unless `FLYX_LAB_ACTIVE=1` and `FLYX_HITL=0` and sim time
-is on (`echo $FLYX_LAB_ACTIVE $FLYX_HITL`). It exits 0 after "landed and disarmed", 1 on any abort;
-it yields (stops streaming) if Offboard is lost, holds and then lands on a fault. Optional ROS parameters go after `--ros-args`, e.g. `-p max_path_speed_mps:=0.5`.
-With a colcon-built workspace: `ros2 launch localizer sim.launch.py approved:=true`.
-A terminal run is not a graded Run; record it yourself with `ros2 bag record` if needed.
-
-## Run on the drone (skybeta Jetson, ROS 2 Humble)
-
-Each step needs the team's approval. The pilot arms on RC and switches to Offboard; our code never
-arms and never touches `/fmu/in`.
-
-1. **Deploy** only the package to the team workspace (`~/team_ws/src/localizer`; never `~/connor`),
-   for example from the laptop repo root (Git Bash; excludes bytecode and tests):
-   `tar --exclude=__pycache__ -cf - -C localizer localizer launch data resource package.xml setup.py setup.cfg | ssh skybeta 'mkdir -p ~/team_ws/src/localizer && tar -xf - -C ~/team_ws/src/localizer'`
-2. **Build** in the `skybeta-stack` container with the team build script (`team_build.sh`), as for
-   any team package.
-3. **Preview** (props off is fine), next to the stack's running flight_interface:
-   `ros2 launch localizer real.launch.py`
-   then watch `/localizer/status` (mode, T, `expected_trajectory_setpoint_ned`, `expected_yaw_ned_deg`
-   vs `px4_yaw_ned_deg`) and `/localizer/setpoint_preview`. `dry_run:=true` plays the whole path
-   on the preview topic without a vehicle.
-4. **Bench, props off**: `ros2 launch localizer real.launch.py live:=true`
-   and check `/fmu/in/trajectory_setpoint`; measure the yaw offset (HALF_ASSED.md).
-   Pass `mpc_xy_p:=<the drone's MPC_XY_P>` and `command_yaw:=false` until the yaw agrees.
-5. **Flight**: tethered hover, then pad to M1 at <= 1 m/s, then the full course with a speed ramp
-   (`max_path_speed_mps:=`). To start it from the stack instead, set `COMPETITOR_PKG=localizer` and
-   `COMPETITOR_LAUNCH=real.launch.py` in `/etc/skybeta/drone.env` (ask first); there it needs
-   `with_flight_interface:=true` (default false, so a manual launch never starts a second one) and
-   `live:=true` to fly. How the stack passes launch arguments is not verified.
-
-## Run the tests (laptop, no ROS)
-
-```sh
-py -m pytest -q localizer          # core, state machine, adapter conversions, offline closed loop
-py -m pytest -q tests              # the lab's refnav tests
-py localizer/test/closed_loop.py --png closed_loop.png   # sim vs real adapter on the PX4 model
-```
-
-Planner (Windows: MSYS2 UCRT64 + OMPL 1.7.0, see `planner/README.md`; Linux: apt packages):
-
-```sh
-cd planner
-cmake -S . -B build -G Ninja -DCMAKE_PREFIX_PATH="C:/Users/Conno/projects/ompl-1.7.0;C:/msys64/ucrt64"
-cmake --build build -j
-py tests/run_tests.py build        # parity, checkpoints, file format; some checks are timing/RRT-flaky
-./build/gcopter_planner config/course_v3.yaml    # a new plan (random: differs every run)
-```
+- `localizer/`: the team's ROS 2 path-follower package for the simulator (`python3 -m localizer.sim`)
+  and an alternative real-drone adapter; its notes are in `localizer/HALF_ASSED.md`.
+- `onboard/`, `refnav/`, `main.py`, `learn/`: the lab workspace (`docs/LAB_WORKSPACE.md`).
+- `docs/deploy_notes/`: dated deploy and bench records from the drone.

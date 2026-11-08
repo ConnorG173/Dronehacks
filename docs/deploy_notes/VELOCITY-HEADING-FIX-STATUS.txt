@@ -1,0 +1,85 @@
+Velocity heading fix — source saved 2026-11-08 UTC; runtime activation pending
+
+Diagnosis from the saved dashboard API snapshot:
+  ../position_5cm_candidate_20261108T033435Z/before-state.json
+The velocity course ran for 20.60 s before Stop/Hold. It advanced 0.99 s into
+the 33.8 s trajectory (2.94%, approximately 4 cm of reference displacement).
+Initial geometric heading was 99.49 degrees. At the saved progress the path
+heading was 97.41 degrees, but the controller's last desired heading was
+-91.13 degrees: a wrapped difference of 171.46 degrees. Initial alignment
+therefore completed at least once; the target subsequently changed near the
+start. The USB send log also contains alternating vision-heading swings and
+mostly zero-translation intervals. It does not record every desired yaw or
+controller phase, so the exact per-tick flight sequence cannot be reconstructed.
+
+Cause addressed:
+The adapter replaced geometric yaw with atan2 of the final velocity setpoint.
+At low speed, position corrections or inverse-model braking can point backward
+even though the desired route direction is forward. Heading pacing then changed
+that same velocity vector, creating a feedback loop between turning and stopping.
+The fixed controller keeps yaw feedback and yaw-rate feedforward tied to the
+same geometric tangent. Sideways/backward corrective velocity is not treated
+as an instruction to rotate the camera.
+
+Changes:
+- Initial alignment publishes a fixed position plus bounded absolute yaw,
+  through the existing pose interface. Limits are 45 deg/s and 90 deg/s^2.
+  It requires 0.2 s with heading error <=5 degrees, horizontal speed <=0.15 m/s,
+  measured yaw-rate magnitude <=5 deg/s, position error <=0.15 m, and a completed
+  commanded turn before transitioning to velocity control.
+- Initial alignment and subsequent heading waits abort after 12 s if alignment
+  fails. The caller holds the latest actual position and does not auto-resume.
+- Course yaw stays on the path tangent. The 5–10 degree heading pacing remains;
+  exceeding 10 degrees freezes path progress and ramps velocity toward zero.
+- Normal velocity changes are limited to 1 m/s^2 in 3D and 0.5 m/s^2 vertically.
+  Fence/altitude guards and fault stops can override those command slew limits.
+- Inverse-lag feedforward includes the changing-clock acceleration v_ref*tau_ddot.
+  The 0.55 s lag and 0.10 s delay remain unmeasured assumptions.
+- New API diagnostics and ROS phase-transition logs include desired/measured
+  heading, heading error, measured yaw rate, alignment/wait time and command mode.
+- The dashboard's owned velocity_tracker.py contains the adapted pure tracker.
+  The installed alt_tracker package remains unchanged; provenance is recorded in
+  VELOCITY-TRACKER-PROVENANCE.json. An old dashboard caller rejects the new adapter
+  rather than silently omitting its absolute-heading command.
+
+Validation completed without ROS, HTTP flight requests, arming or vehicle access:
+  OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python3 -B -m unittest -q \
+    test_velocity_heading test_course_follow test_heading_control test_yaw_tracker
+  49 tests passed, including the actual dashboard publication callback extracted
+  with inert message/publisher stubs. This is not a full ROS/MAVLink integration run.
+  Four unchanged upstream tracker test functions also passed against the adapted module.
+  Four full-route comparisons used the same 1394-point route, 10 Hz control,
+  0.1 s command delay, velocity lag 0.30/0.55/0.80 s and yaw-rate lag 0/0.1/0.2 s.
+  All completed without post-alignment heading_wait ticks or the 0.5 m error trip.
+  Nominal assumed model: 121.5 s before, 37.8 s after. These are synthetic results,
+  not measured flight timing, clearance qualification or a validated vehicle model.
+
+PX4 references consulted:
+  https://docs.px4.io/v1.16/en/flight_modes/offboard
+  https://docs.px4.io/main/en/msg_docs/TrajectorySetpoint
+  https://github.com/PX4/PX4-Autopilot/blob/v1.16.2/src/modules/mc_pos_control/PositionControl/PositionControl.cpp
+  https://github.com/PX4/PX4-Autopilot/blob/v1.16.2/src/modules/mavlink/mavlink_receiver.cpp
+Velocity is a local-world-frame setpoint; yaw and yaw rate are separate fields.
+The existing ENU/NED conversions and the flight interface were not changed.
+
+Remaining before a drone retest:
+1. Run PX4 SITL through the real dashboard/interface/MAVLink path, including
+   both turn directions, initial alignment with position/yaw lag, the first
+   metre, the full route, Hold, takeover, telemetry loss and alignment timeout.
+2. While disarmed/landed, restart only the dashboard with its existing launch
+   arguments and verify the updated diagnostics and a single setpoint publisher.
+   Do not restart the full launch alongside its replacement flight interface.
+3. After SITL and deployment readback, use a pilot-approved bounded flight test
+   that checks alignment and the beginning of the route before the full course.
+
+Runtime was NOT restarted: this session cannot access the Docker socket or the
+live dashboard endpoint. Source changes alone do not update imported Python code.
+The previously running dashboard may still have the old controller loaded.
+
+Evidence and backups:
+  /home/dronehacks/team_ws/claude/velocity_tracker_fix_20261108T035643Z/
+  before/                 original modules for review/rollback
+  comparison-before.json  original offline comparison
+  comparison-after.json   final module hashes, assumptions and four passing runs
+  benchmark_velocity.py   reproducible comparison (VELOCITY_REVIEW_SOURCE selects source)
+  source-install.json     hashes of installed files and runtime activation status

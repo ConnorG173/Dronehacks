@@ -1,0 +1,52 @@
+Browser link update — deployed 2026-11-08 UTC
+
+Measured before the update:
+  MacBook Tailscale ICMP:10/10 replies,0%loss,40.074–642.325ms,
+  mean245.509ms, deviation175.878ms. Tailscale discovery pings94–937ms.
+  Direct public endpoint observed; this was not a DERP relay connection.
+  Local dashboard:30 responses,5.64–20.52ms, median6.42ms.
+  Median response40352bytes; course data37824bytes was mostly unchanged.
+  FC and position ages stayed fresh in those local samples.
+  Wi-Fi first-hop test:0%loss,1.48–45.82ms, mean12.51ms; did not reproduce
+  the peer's largest spikes. Signal-59dBm,2.4GHz, power save off.
+  RX drop counters increased51 in4.52s; cause not established.
+
+Changes:
+  HTTP/1.1 persistent connections, explicit content lengths, TCP_NODELAY.
+  Idle sockets time out after5s; rejected/unconsumed requests close connection.
+  Conditional geometry: send depth and original/adjusted world route arrays
+  only when their version changes. Every poll still sends fresh telemetry,
+  metadata, ages and stale/invalid flags. Redundant course-coordinate copies
+  are omitted from the browser response; original stored data is preserved.
+  Version keys include process identity, reference changes, and stale clearing.
+  Pending preview work cannot publish a new cache key before its result commits.
+  The browser borrows omitted arrays only for matching versions; mismatches
+  clear geometry and fetch a complete copy on the next ordinary poll.
+  No command retry, automatic arm, heartbeat extension or stale-data masking.
+  Browser fetch timeout900ms and owner/watchdog1s remain unchanged.
+  Hidden dashboard tabs intentionally pause their heartbeat as before.
+
+Verified after deployment:
+  30 requests on one TCP connection, HTTP/1.1 confirmed.
+  Local response2.23–8.28ms, median2.78ms.
+  Payload1989–3142bytes, median1990.5bytes:95.1%smaller than the earlier median.
+  Depth cache24/30 hits; course cache29/30 hits.
+  Actual MacBook HTTP TCP connection also observed staying established.
+  Latest ICMP sample:10/10 replies,0%loss,4.749–10.797ms,
+  mean6.145ms, deviation1.702ms.
+  Tailscale changed from a public endpoint to a private-network endpoint during
+  testing. No route/interface/Tailscale configuration was changed by the agent.
+  Do not attribute all network improvement to the HTTP code; endpoint selection
+  also changed. This short sample does not establish long-term jitter bounds.
+
+Tests:52 Python checks across HTTP/control/course/cache/wire modules and20
+browser-JavaScript checks passed for the link update. Earlier geometry/import
+checks also passed. Authenticated live read-only GETs confirmed the new client
+and1394 stored trajectory samples. Dashboard restarted only after fresh USB
+confirmed disarmed and landed; adapter and ML worker remained running.
+
+Refresh the dashboard once to load the new client. Course route persists;
+course alignment still requires explicit reference capture after restart.
+Evidence:claude/mavlink_usb/course_deploy_20261108T014712Z/
+  local-http-before.json, local-http-after.json, link-final-state.json,
+  dashboard-refresh.jsonl, recording.status.json (passive observer completed).

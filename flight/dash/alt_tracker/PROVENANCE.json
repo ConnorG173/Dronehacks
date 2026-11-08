@@ -1,0 +1,27 @@
+{
+  "source_project": "Dronehacks-path-following",
+  "repository_head": "05ea9d868675dc3618bdc40854abb021520b4a3e",
+  "source_working_tree_changes": [
+    "pathfile.py is locally modified relative to HEAD; working-tree bytes copied unchanged"
+  ],
+  "files": {
+    "tracker.py": {
+      "source": "path_following/team_path_following/team_path_following/tracker.py",
+      "sha256": "1e7867f4b4be9ec449ddaac371128e915738a1567840a9bf0682c9f2a67e6b23"
+    },
+    "pathfile.py": {
+      "source": "path_following/team_path_following/team_path_following/pathfile.py",
+      "sha256": "b1272ee06d08cb60a1c94cb5d32dfdec45119c2edb2890e9f3fdefc2a62fb232"
+    },
+    "frames.py": {
+      "source": "path_following/team_path_following/team_path_following/frames.py",
+      "sha256": "971eda979cda993788daf33df4eda5ac7627a79a49ef10542e5ea3a57ecd9037"
+    }
+  },
+  "upstream_validation": {
+    "command": "14 unchanged plain test functions in test_tracker.py, test_pathfile.py, test_frames.py invoked directly; tmp_path supplied by tempfile.TemporaryDirectory",
+    "result": "14 passed",
+    "pytest_attempt": "python3 -m pytest unavailable: No module named pytest"
+  },
+  "scope": "Only these three pure modules are vendored. No mission, arming, landing, planner, Gate B or simulator code is used."
+}

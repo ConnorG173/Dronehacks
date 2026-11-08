@@ -1,0 +1,59 @@
+Depth Anything fence overlay — deployed 2026-11-08 01:01 UTC
+
+The live USB dashboard displays teal estimated surface cells on the existing
+top-down fence map. Show depth defaults on. Cells share the map's PX4-local ENU
+coordinates and home rotation. Original flight controls are unchanged.
+
+Source: existing Depth Anything V2 Small relative TensorRT FP16 engine,
+claude/models/da2s_252x406_fp16.engine. Each image gets a fresh inverse-depth
+metric fit against synchronized stereo; a failed fit is never reused.
+Rectified optical rays use live camera calibration/TF and image-aligned USB
+position/attitude. Pose matching uses host receipt timestamps, not FC boot time.
+Processing is capped at 2 Hz, with one CPU thread per numeric library and nice 10.
+
+Display retains vertical surface cells in 8 cm world bins, optical depth
+0.3–4 m, gravity-level height -0.25 to +0.8 m relative to the body. Each bin
+needs two returns spanning 0.12 m vertically. Flat floors are suppressed.
+This is estimated surface visualization, not a complete obstacle/free-space map.
+It does not steer the vehicle or establish clearance. Empty cells are unknown.
+Stale/invalid/unscaled frames disappear; live image age must be <=1.5 seconds.
+
+Startup: USB dashboard.launch.py launches a stdlib-only ground gate first.
+Imports/model loading wait for fresh disarmed/landed USB telemetry, stable for
+two seconds; the worker also checks fresh ROS ground state before model load.
+The worker respawns independently after ten seconds. Its exit does not stop
+flight nodes. Existing enabled skybeta-stack.service and USB wrapper select it
+on boot. Boot configuration was checked; no reboot was performed for this change.
+
+Validation: 33 dashboard readiness/motion/cache tests, 8 geometry tests, 2 stereo
+pairing tests, 6 ground-gate tests, and 9 browser-JavaScript tests passed.
+Served HTML and authenticated read-only API both verified after deployment.
+No verification command armed or moved the drone. Deployment happened while
+fresh independent USB and DDS observations confirmed disarmed and landed.
+
+Post-deploy 30-second observation included the user's takeoff into Offboard:
+  All 61 API samples reported live depth, no read errors.
+  57 distinct frames sampled; processing loop is 2 Hz.
+  Model inference: median 11.1 ms, max 19.6 ms.
+  Total processing: median 99.5 ms, max 136.8 ms.
+  Display image age: median 0.595 s, max 0.743 s.
+  Image/position receipt-time match: max 8.1 ms.
+  Surface cells: 0–107, depending on the scene and height filter.
+  Max observed callback gaps: raw VIO 64.115 ms, bridge vision 66.622 ms,
+  Offboard heartbeat 104.574 ms, USB position 63.337 ms.
+  All 840 cuVSLAM status samples reported tracking state 1.
+These measure host publication/observation, not independent PX4 receipt timing.
+
+The initial isolated ground benchmark had a 370 ms vision publication gap near
+worker imports/subscription startup, before model initialization. That motivated
+the ground-only startup gate. Its steady processing window had vision gaps <=66 ms.
+This short observation does not establish long-duration flight reliability or
+metric obstacle accuracy. The previously requested 50% motor cap is not enforced.
+
+Evidence (container /root/team_ws is host /home/dronehacks/team_ws):
+  claude/mavlink_usb/depth_deploy_20261108T005917Z/
+    launch-changes.jsonl, dashboard-state.json, dashboard-final.json,
+    runtime-final.json, steady.summary.json, worker-summary.json,
+    worker-samples.jsonl, recording.status.json (ground observer completed)
+  claude/depth_overlay/bench_20261108T005636Z/
+    timing.jsonl, timing-summary.json

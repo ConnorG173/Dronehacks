@@ -1,0 +1,17 @@
+# per-drone secrets and state
+dash/dash_token.txt
+dash/course.json
+dash/course_marks.json
+mavlink_usb/enabled
+mavlink_usb/heading_fix_enabled
+mavlink_usb/runtime-status.json
+# recordings, bench data, camera output
+mavlink_usb/runs/
+mavlink_usb/*_2026*/
+depth_overlay/view.jpg
+depth_overlay/status.json
+depth_overlay/worker.lock
+depth_overlay/rec/
+depth_overlay/bench_*/
+*.before*
+*.log

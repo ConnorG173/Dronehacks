@@ -1,0 +1,65 @@
+Avoidance and automatic course launch: running after reboot; NOT ready for flight
+
+Build: avoidance-autoflight-v1
+The operator confirmed the running build after reboot using activate.py --check.
+Docker access remains unavailable to this session, so verification uses the pasted
+live API response plus current local telemetry files. There are zero competing
+setpoint publishers; PX4 reports disarmed, landed and Offboard. The dashboard is
+latched in FAILSAFE because its owner heartbeat was lost. Depth observations are
+intermittently unscaled or empty, and the adjusted course is waiting for usable
+wall observations. Reconnect the controlling dashboard and reset home on the
+launch mark while grounded; do not arm without a fresh validated route.
+The newer velocity-heading fix was preserved in this merged source.
+
+Implemented behavior after activation:
+- Set home / course start starts background obstacle planning automatically.
+- ARM & fly course validates a fresh full adjusted route before sending one normal
+  manual ARM request. It climbs to the first waypoint, waits for settled XYZ
+  velocity/position for 0.5 seconds, then starts the selected follower.
+- Prepare course queues the same sequence for manual RC arming in Offboard.
+  The timer never sends ARM or changes flight mode. Manual ARM remains available
+  by clearing the automatic-course checkbox.
+- Both followers use the complete adjusted geometry; the displayed purple line
+  stays on that committed route during execution. The original route is preserved.
+- Flight checks full measured-to-command segments, current and commanded stopping
+  paths, fresh depth, and remembered occupied cells after the camera turns away.
+  New blocking obstacles stop the course; there is no automatic in-flight replan
+  or resume. An airborne obstacle fault sends one current-position brake and
+  requests interface hold, then latches stopped.
+- Stale/empty/unscaled depth cannot authorize flight. Missing authority, heartbeat,
+  VIO/telemetry, position-reference changes, manual overrides and takeoff timeout
+  cancel the queued or active course. Existing emergency KILL remains available.
+
+Limits and qualification:
+Guarded course speed <=0.35 m/s. Planned wall clearance is at least 0.40 m
+(>=0.30 m command clearance plus 0.10 m tracking reserve), plus wall-cell radius.
+Stopping checks assume 0.5 m/s^2 braking and 0.2 s reaction, plus actual frame age.
+These assumptions are NOT measured aircraft performance. The current ML depth
+source reports wall-like surfaces, not complete free space or overhead obstacles.
+This change cannot guarantee collision-free flight.
+
+Validation:
+118 offline Python checks passed, including the preserved heading regression tests.
+10 mocked browser checks passed in V8. Both followers completed the saved 1394-point
+course and a synthetic wall detour through automatic takeoff in ideal kinematics.
+No physical flight, real ROS/MAVLink integration or dynamics qualification occurred.
+
+Activation from a terminal that can access the existing Docker container:
+python3 /home/dronehacks/team_ws/claude/avoidance_autoflight_fix/activate.py
+
+The helper verifies installed hashes and fresh disarmed/landed telemetry, restarts
+only the supervised dashboard, and checks the reported build and publisher state.
+It never arms, takes control, changes flight modes or restarts the whole stack.
+After activation, refresh the dashboard, take control, set home on the launch mark,
+and wait for a fresh valid route. Complete grounded preflight and controlled flight
+validation before treating this as ready for a full course flight.
+
+Evidence/backups: ../avoidance_autoflight_fix/
+source-install.json, validation-python.txt, validation-browser.json,
+validation-flight-model.json, before/, before_velocity_merge/, installed_before/
+
+Post-reboot scene clarification: the operator reports an empty floor with no
+walls. Floor returns are intentionally filtered; zero wall cells in this view
+do not establish a camera fault. This scene is insufficient to validate the
+autonomous course or qualify obstacle avoidance. No sensor thresholds or
+flight guards were relaxed. The heartbeat failsafe still needs a grounded reset.

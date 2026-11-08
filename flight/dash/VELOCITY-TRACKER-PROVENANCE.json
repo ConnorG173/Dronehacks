@@ -1,0 +1,13 @@
+{
+  "upstream_file": "alt_tracker/tracker.py",
+  "upstream_sha256": "1e7867f4b4be9ec449ddaac371128e915738a1567840a9bf0682c9f2a67e6b23",
+  "source_project": "Dronehacks-path-following",
+  "repository_head": "05ea9d868675dc3618bdc40854abb021520b4a3e",
+  "derived_file": "velocity_tracker.py",
+  "sha256": "563fe9d39995391c247e335beda37af042d7be6e678ffb909382724e4f8d137d",
+  "changes": [
+    "Include v_ref * tau_ddot in inverse-lag feedforward.",
+    "Import unchanged frame helpers from alt_tracker.frames."
+  ],
+  "installed_upstream_package_modified": false
+}

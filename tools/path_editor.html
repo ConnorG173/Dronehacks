@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Path Editor</title>
+<style>
+:root{--bg:#0d1117;--panel:#161b22;--line:#30363d;--text:#e6edf3;--dim:#8b949e;--edit:#3fb950;--orig:#6e7681;--warn:#e5a84b;--hand:#58a6ff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px ui-monospace,Menlo,monospace}
+header{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+header b{font-size:15px;margin-right:8px}
+button,label.btn{background:#21262d;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:5px 10px;font:inherit;cursor:pointer}
+button:hover,label.btn:hover{border-color:var(--hand)}
+input[type=file]{display:none}
+main{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:12px;padding:12px 16px}
+@media (max-width:860px){main{grid-template-columns:1fr}}
+canvas{width:100%;background:#0a0d12;border:1px solid var(--line);border-radius:6px;display:block;touch-action:none}
+#top{aspect-ratio:1/1}
+#side{aspect-ratio:4/1;margin-top:10px}
+aside{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px;align-self:start}
+aside h3{margin:0 0 8px;font-size:13px;color:var(--dim);font-weight:normal;text-transform:uppercase;letter-spacing:.05em}
+.row{display:flex;justify-content:space-between;margin:4px 0}
+.warn{color:var(--warn)}
+.small{color:var(--dim);font-size:12px;line-height:1.5}
+input[type=range]{width:100%}
+hr{border:0;border-top:1px solid var(--line);margin:12px 0}
+</style></head><body>
+<header>
+  <b>Path editor</b>
+  <label class="btn">Open CSV…<input id="file" type="file" accept=".csv"></label>
+  <button id="undo">Undo (⌘Z)</button>
+  <button id="reset">Reset to original</button>
+  <button id="export">Export CSV</button>
+  <span id="name" class="small"></span>
+</header>
+<main>
+  <div>
+    <canvas id="top" width="900" height="900"></canvas>
+    <canvas id="side" width="900" height="225"></canvas>
+  </div>
+  <aside>
+    <h3>Edit</h3>
+    <div class="row"><span>Smoothing width</span><span id="rv"></span></div>
+    <input id="radius" type="range" min="0.1" max="3" step="0.05" value="0.8">
+    <div class="row"><label><input id="lock" type="checkbox" checked> lock start &amp; end</label></div>
+    <div class="row"><label><input id="snapz" type="checkbox"> height: 5 cm steps</label></div>
+    <hr>
+    <h3>Path</h3>
+    <div class="row"><span>duration</span><span id="dur"></span></div>
+    <div class="row"><span>max speed</span><span id="vmax"></span></div>
+    <div class="row"><span>max accel</span><span id="amax"></span></div>
+    <div class="row"><span>height</span><span id="zr"></span></div>
+    <div class="row"><span>max moved</span><span id="moved"></span></div>
+    <div class="row"><span>cursor</span><span id="cur">–</span></div>
+    <hr>
+    <p class="small">Top view: forward is up, right is right, 0.5 m grid, origin on the pad.
+    Drag a blue handle to move the path sideways; drag on the height strip to move it up or down.
+    Nearby points follow with a smooth falloff set by the smoothing width (seconds of path).
+    Timing is kept; velocity and acceleration are recomputed; yaw is kept as planned.
+    Scroll to zoom, drag empty space to pan.</p>
+    <p class="small">Grey = original, green = edited. Export writes the same 12 columns
+    (PX4 NED at the pad), ready for import_path.py.</p>
+  </aside>
+</main>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const topC = $('top'), side = $('side'), gt = topC.getContext('2d'), gs = side.getContext('2d');
+let name = '', T = [], orig = [], P = [], yaw = [], undo = [];
+let view = {cx: 0, cy: 0, s: 100};          // topC view: metres -> canvas px around (cx, cy) in NED x/y
+let drag = null, hover = -1;
+
+function parse(text) {
+  const lines = text.trim().split(/\r?\n/), head = lines[0].split(',');
+  const col = k => head.indexOf(k);
+  if (['t','x','y','z','yaw'].some(k => col(k) < 0)) throw new Error('expected columns t,x,y,z,...,yaw');
+  T = []; orig = []; yaw = [];
+  for (const l of lines.slice(1)) {
+    const v = l.split(',').map(Number);
+    T.push(v[col('t')]); orig.push([v[col('x')], v[col('y')], v[col('z')]]); yaw.push(v[col('yaw')]);
+  }
+  P = orig.map(p => p.slice()); undo = [];
+  fit(); draw();
+}
+function load(text, n) {
+  try { parse(text); name = n; $('name').textContent = n + ' · ' + T.length + ' rows'; }
+  catch (e) { alert('Could not read CSV: ' + e.message); }
+}
+
+// ---- geometry ----
+const handleStep = () => Math.max(1, Math.round(0.25 / ((T[T.length-1]-T[0]) / (T.length-1))));   // a handle per ~0.25 s
+const handles = () => { const s = handleStep(), h = []; for (let i = 0; i < P.length; i += s) h.push(i);
+  if (h[h.length-1] !== P.length-1) h.push(P.length-1); return h; };
+function deriv(Q) {               // central differences on the fixed time base
+  const n = Q.length, d = [];
+  for (let i = 0; i < n; i++) {
+    const a = Math.max(0, i-1), b = Math.min(n-1, i+1), dt = T[b]-T[a] || 1;
+    d.push([0,1,2].map(k => (Q[b][k]-Q[a][k]) / dt));
+  }
+  if (n > 1) { d[0] = [0,0,0]; d[n-1] = [0,0,0]; }   // planner rows start and end at rest
+  return d;
+}
+function weight(i, ih, R) {
+  const dt = Math.abs(T[i]-T[ih]);
+  if (dt >= R) return 0;
+  let w = 0.5 * (1 + Math.cos(Math.PI * dt / R));
+  if ($('lock').checked) {        // fade to zero at the ends so start and end never move
+    const e = Math.min(T[i]-T[0], T[T.length-1]-T[i]);
+    w *= Math.min(1, e / Math.max(R, 1e-6));
+  }
+  return w;
+}
+
+// ---- topC view transform (NED: x forward = screen up, y right = screen right) ----
+const W = () => topC.width, H = () => topC.height;
+const tx = p => W()/2 + (p[1]-view.cy) * view.s, ty = p => H()/2 - (p[0]-view.cx) * view.s;
+const inv = (X, Y) => [view.cx - (Y - H()/2) / view.s, view.cy + (X - W()/2) / view.s];
+function fit() {
+  const xs = orig.map(p => p[0]).concat(0), ys = orig.map(p => p[1]).concat(0);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  view.cx = (x0+x1)/2; view.cy = (y0+y1)/2;
+  view.s = 0.85 * Math.min(W() / Math.max(y1-y0, .5), H() / Math.max(x1-x0, .5));
+}
+// side view: time -> x, height (-z) -> y
+const zr = () => { const h = orig.map(p => -p[2]).concat(P.map(p => -p[2]), 0);
+  return [Math.min(...h) - .2, Math.max(...h) + .2]; };
+const sx = i => 40 + (T[i]-T[0]) / (T[T.length-1]-T[0]) * (side.width - 60);
+const sy = (h, r) => side.height - 20 - (h - r[0]) / (r[1]-r[0]) * (side.height - 35);
+
+function line(g, pts, X, Y, color, w, dash) {
+  g.strokeStyle = color; g.lineWidth = w; g.setLineDash(dash || []); g.beginPath();
+  pts.forEach((p, i) => i ? g.lineTo(X(p, i), Y(p, i)) : g.moveTo(X(p, i), Y(p, i))); g.stroke(); g.setLineDash([]);
+}
+function draw() {
+  if (!P.length) return;
+  // topC
+  gt.clearRect(0, 0, W(), H());
+  gt.strokeStyle = '#1c222b'; gt.lineWidth = 1;
+  const [xa, ya] = inv(0, H()), [xb, yb] = inv(W(), 0);
+  for (let g = Math.floor(Math.min(xa, xb)*2)/2; g <= Math.max(xa, xb); g += .5) {
+    gt.beginPath(); gt.moveTo(0, ty([g, 0])); gt.lineTo(W(), ty([g, 0])); gt.stroke(); }
+  for (let g = Math.floor(Math.min(ya, yb)*2)/2; g <= Math.max(ya, yb); g += .5) {
+    gt.beginPath(); gt.moveTo(tx([0, g]), 0); gt.lineTo(tx([0, g]), H()); gt.stroke(); }
+  gt.fillStyle = '#8b949e'; gt.beginPath(); gt.arc(tx([0,0]), ty([0,0]), 5, 0, 7); gt.fill();
+  gt.font = '13px ui-monospace,monospace'; gt.fillText('pad', tx([0,0]) + 8, ty([0,0]) - 6);
+  line(gt, orig, tx, ty, '#6e7681', 2, [6, 4]);
+  line(gt, P, tx, ty, '#3fb950', 2.5);
+  for (const i of handles()) {
+    gt.fillStyle = i === hover || (drag && drag.i === i) ? '#f0f6fc' : '#58a6ff';
+    gt.beginPath(); gt.arc(tx(P[i]), ty(P[i]), i === hover ? 6 : 4, 0, 7); gt.fill();
+  }
+  const e = P[P.length-1]; gt.strokeStyle = '#3fb950'; gt.lineWidth = 2;
+  gt.beginPath(); gt.arc(tx(e), ty(e), 7, 0, 7); gt.stroke();
+  // side
+  const r = zr(); gs.clearRect(0, 0, side.width, side.height);
+  gs.fillStyle = '#8b949e'; gs.font = '12px ui-monospace,monospace';
+  for (let h = Math.ceil(r[0]*2)/2; h <= r[1]; h += .5) {
+    gs.strokeStyle = '#1c222b'; gs.beginPath(); gs.moveTo(40, sy(h, r)); gs.lineTo(side.width, sy(h, r)); gs.stroke();
+    gs.fillText(h.toFixed(1), 4, sy(h, r) + 4);
+  }
+  line(gs, orig, (p, i) => sx(i), p => sy(-p[2], r), '#6e7681', 2, [6, 4]);
+  line(gs, P, (p, i) => sx(i), p => sy(-p[2], r), '#3fb950', 2.5);
+  for (const i of handles()) { gs.fillStyle = i === hover ? '#f0f6fc' : '#58a6ff';
+    gs.beginPath(); gs.arc(sx(i), sy(-P[i][2], r), 3.5, 0, 7); gs.fill(); }
+  stats();
+}
+function stats() {
+  const v = deriv(P), a = deriv(v), n = x => Math.hypot(...x);
+  const vm = Math.max(...v.map(n)), am = Math.max(...a.map(n));
+  const vo = Math.max(...deriv(orig).map(n));
+  $('dur').textContent = (T[T.length-1]-T[0]).toFixed(2) + ' s';
+  $('vmax').textContent = vm.toFixed(2) + ' m/s'; $('vmax').className = vm > 1.2*vo ? 'warn' : '';
+  $('amax').textContent = am.toFixed(2) + ' m/s²';
+  const h = P.map(p => -p[2]);
+  $('zr').textContent = Math.min(...h).toFixed(2) + '–' + Math.max(...h).toFixed(2) + ' m';
+  $('moved').textContent = Math.max(...P.map((p, i) => Math.hypot(p[0]-orig[i][0], p[1]-orig[i][1], p[2]-orig[i][2]))).toFixed(2) + ' m';
+  $('rv').textContent = (+$('radius').value).toFixed(2) + ' s';
+}
+
+// ---- interaction ----
+const pt = (c, ev) => { const b = c.getBoundingClientRect(); return [(ev.clientX-b.left) * c.width/b.width, (ev.clientY-b.top) * c.height/b.height]; };
+function nearest(c, X, Y) {
+  let best = -1, bd = 14 * c.width / c.getBoundingClientRect().width, r = zr();
+  for (const i of handles()) {
+    const d = c === topC ? Math.hypot(tx(P[i])-X, ty(P[i])-Y) : Math.hypot(sx(i)-X, sy(-P[i][2], r)-Y);
+    if (d < bd) { bd = d; best = i; }
+  }
+  return best;
+}
+function down(c, ev) {
+  const [X, Y] = pt(c, ev), i = nearest(c, X, Y);
+  c.setPointerCapture(ev.pointerId);
+  if (i >= 0) { undo.push(P.map(p => p.slice())); if (undo.length > 50) undo.shift();
+    drag = {c, i, X, Y, base: P.map(p => p.slice()), r: zr()}; }
+  else if (c === topC) drag = {c, pan: true, X, Y, cx: view.cx, cy: view.cy};
+}
+function move(c, ev) {
+  const [X, Y] = pt(c, ev);
+  if (c === topC) { const [x, y] = inv(X, Y); $('cur').textContent = `fwd ${x.toFixed(2)} · right ${y.toFixed(2)}`; }
+  if (!drag) { const h = nearest(c, X, Y); if (h !== hover) { hover = h; draw(); } return; }
+  if (drag.pan) { view.cx = drag.cx + (Y-drag.Y) / view.s; view.cy = drag.cy - (X-drag.X) / view.s; draw(); return; }
+  const R = +$('radius').value, b = drag.base, i0 = drag.i;
+  if (c === topC) {
+    const dx = -(Y-drag.Y) / view.s, dy = (X-drag.X) / view.s;
+    P = b.map((p, i) => { const w = weight(i, i0, R); return [p[0] + w*dx, p[1] + w*dy, p[2]]; });
+  } else {
+    const r = drag.r, per = (r[1]-r[0]) / (side.height - 35);
+    let dz = (Y-drag.Y) * per;                          // NED z: down positive, screen y down positive
+    if ($('snapz').checked) { const h = -(b[i0][2] + dz); dz = -(Math.round(h * 20) / 20) - b[i0][2]; }
+    P = b.map((p, i) => { const w = weight(i, i0, R); return [p[0], p[1], p[2] + w*dz]; });
+  }
+  draw();
+}
+for (const c of [topC, side]) {
+  c.addEventListener('pointerdown', ev => down(c, ev));
+  c.addEventListener('pointermove', ev => move(c, ev));
+  c.addEventListener('pointerup', () => { drag = null; draw(); });
+}
+topC.addEventListener('wheel', ev => { ev.preventDefault();
+  const [X, Y] = pt(topC, ev), before = inv(X, Y);
+  view.s *= Math.exp(-ev.deltaY * 0.0015);
+  const after = inv(X, Y); view.cx += before[0]-after[0]; view.cy += before[1]-after[1]; draw(); }, {passive: false});
+$('radius').addEventListener('input', stats);
+$('undo').onclick = () => { if (undo.length) { P = undo.pop(); draw(); } };
+document.addEventListener('keydown', ev => { if ((ev.metaKey || ev.ctrlKey) && ev.key === 'z') { ev.preventDefault(); $('undo').onclick(); } });
+$('reset').onclick = () => { undo.push(P.map(p => p.slice())); P = orig.map(p => p.slice()); draw(); };
+$('file').onchange = ev => { const f = ev.target.files[0]; if (f) f.text().then(t => load(t, f.name)); };
+$('export').onclick = () => {
+  const v = deriv(P), a = deriv(v), f = x => x.toFixed(6);
+  const rows = ['t,x,y,z,vx,vy,vz,ax,ay,az,yaw,yaw_rate'];
+  for (let i = 0; i < P.length; i++) {
+    const j = Math.min(P.length-1, i+1), k = Math.max(0, i-1);
+    let dyaw = yaw[j]-yaw[k]; dyaw = Math.atan2(Math.sin(dyaw), Math.cos(dyaw));
+    const yr = i === 0 || i === P.length-1 ? 0 : dyaw / ((T[j]-T[k]) || 1);
+    rows.push([T[i].toFixed(4), ...P[i].map(f), ...v[i].map(f), ...a[i].map(f), f(yaw[i]), f(yr)].join(','));
+  }
+  const url = URL.createObjectURL(new Blob([rows.join('\n') + '\n'], {type: 'text/csv'}));
+  const el = document.createElement('a'); el.href = url;
+  el.download = name.replace(/\.csv$/i, '') + ' edited.csv'; el.click(); URL.revokeObjectURL(url);
+};
+window.addEventListener('resize', draw);
+draw();   // open a planner CSV (t,x,y,z,...,yaw,yaw_rate) to start
+</script>
+</body></html>

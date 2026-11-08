@@ -1,0 +1,81 @@
+Current playback and pacing: see COURSE-START-STATUS.txt and COURSE-PACING-STATUS.txt.
+The historical preview-only report below predates executable Start course,
+shared home/course reference, and the1.5s preview freshness limit.
+
+Course trajectory import and preview — 2026-11-08 UTC
+
+Loaded source:
+  /home/dronehacks/team_ws/claude/paths/course_v3_20261107/path.bin
+  SHA256 33608a095759b30ca2ee3a3a90631433196be302ea6ea238e16a3e8e763b3b8b
+The binary has DHPATH v1, 12 columns, 1394 finite samples, strictly increasing
+time, exact declared length. The sibling CSV matches its documented rounding.
+Original source files were not changed.
+
+Frame: origin at the ground launch mark. Point the nose along the planner's
+map +X direction (into the maze) when capturing the reference. Course +X is
+forward, +Y left, +Z up, in metres. Source pad NED is converted using [x,-y,-z]
+for position, velocity and acceleration; yaw and yaw rate are negated.
+
+Stored outputs:
+  course.json: all 1394 original converted XYZ samples and original times.
+  course_flu.csv: all 12 converted columns at full floating-point precision.
+  course_import.json: source provenance, extents, timing and speed analysis.
+  course-reference.png / .svg: original trajectory and alignment arrows.
+
+The original path begins at (0,0,1) m at rest and ends at
+(0.4724,-1.7069,1) m at rest. It contains neither takeoff nor landing.
+Duration13.929153 s; length17.741176 m; maximum radius5.154084 m.
+Height0.772675–1.211638 m. Peak XY2.426337 m/s; peak vertical0.370333 m/s.
+Uniform stretching by at least2.426337 would satisfy the current1m/s XY and
+0.3m/s vertical limits: duration33.796816s. This retiming is NOT applied, and
+is not a dynamics/clearance validation. The current1.5m movement fence remains.
+
+Dashboard controls:
+  Refresh page, Take control, place disarmed drone at launch mark facing +X,
+  Capture course reference, Fit course view, Refresh preview.
+The imported route is already loaded; no JSON paste is necessary.
+Capture needs fresh grounded position/status, independently of flight-battery
+readiness. Course anchor is separate from hover home and is not restored on
+restart. FC boot-time rollback or a position-delivery gap>2s invalidates it.
+This does not reintroduce EKF gates into flight readiness.
+
+Original dashed grey route and adjusted purple preview share the depth/map
+coordinate transform. Fit course changes display only; Go remains home-relative.
+Course storage and preview never publish flight commands or call hold.
+
+Preview implementation:
+  2Hz background work outside the flight lock, nice10 thread.
+  Current wall XY cells, age<=0.8s, transformed into the captured course frame.
+  Assumed centre clearance0.30m plus half-cell diagonal, max lateral offset0.60m.
+  Full segment checks, bounded lateral polynomial bumps with C2 displacement
+  joins, preserved endpoints and altitude. Original route remains untouched.
+  At most4000 samples/1600 wall cells and150ms compute budget; blocked results
+  have no adjusted geometry. Empty/stale wall observations do not certify space.
+  All geometry checked again after adjustment. Original piecewise-linear input
+  does not become C2 merely because its displacement has C2 joins.
+
+This is a preview, not an executing/re-timed trajectory or certified avoidance.
+The current depth feed is sparse XY wall evidence, without observed-free-space
+coverage or full3D obstacle bounds. It cannot validate a complete detour, thin/
+low/overhead objects, swept-body clearance, acceleration, jerk or stopping range.
+Preview updates do not guarantee temporal continuity between successive frames.
+There is no route-follow action, progress cursor, automatic arm or auto-resume.
+
+Validation included source conversion/persistence, restart/reference invalidation,
+concurrency, frame transforms, segment crossings, blocked gaps/endpoints, bounded
+bumps, stale hiding, course-map click inversion, and no flight-side effects.
+With the real1394-sample route, a synthetic wall on the route was adjusted in
+60.31ms, with0.3078m clearance from the inflated wall cell; a blocked endpoint
+returned no preview. These are synthetic geometry checks, not real clearance.
+Served page/API verified route count1394, needs_anchor, execution_supported=false.
+
+Deployment evidence:
+  claude/mavlink_usb/course_deploy_20261108T014712Z/
+  Both USB and DDS confirmed disarmed/landed for the launch replacement.
+  Subsequent dashboard-only refreshes preserved USB and ML worker processes.
+  No live POST or flight command was used for verification.
+
+Route-panel clarification: loaded route name/count and the reference-capture
+step now appear first. JSON is collapsed under optional Replace route when a
+route is already loaded; no JSON paste is required for course_v3_20261107.
+All 20 existing browser-JavaScript checks passed after this UI adjustment.
