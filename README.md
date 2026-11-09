@@ -21,7 +21,6 @@ Everything runs from one [pixi](https://pixi.sh) environment (Python, CadQuery, 
 ```sh
 pixi run planner-web   # 1. upload the course CAD, place checkpoints, plan  → http://127.0.0.1:8765
 pixi run editor        # 2. optional: drag the planned path, export CSV
-pixi run demo          # 3. the flight dashboard against a recorded flight  → http://127.0.0.1:8099/?k=demo
 pixi run test          # flight logic tests that need no ROS (166 tests)
 pixi run test-planner  # planner tests: upstream parity, checkpoints, file format
 ```
@@ -47,7 +46,6 @@ result is re-checked at 1 ms; a failed plan writes no file. Output: `path.csv` /
 | `upload_course.sh` | Upload an edited CSV to the drone as the course (checks start/end moved) |
 | `convert_hop.py` | Put a second plan (a return hop) into the first course's frame via the shared map frame |
 | `import_path.py`, `import_return.py` | The dashboard API calls behind the two above |
-| `dashboard_demo.py` | Serves the real dashboard page with a recorded state; no drone needed |
 
 ## 3 · Fly (`flight/`)
 

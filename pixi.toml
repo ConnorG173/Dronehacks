@@ -11,7 +11,6 @@ scipy = "*"
 trimesh = "*"
 cadquery = "*"          # STEP import (OCP kernel)
 pytest = "*"
-pillow = "*"            # dashboard demo: rendered depth frames
 cmake = ">=3.10"
 ninja = "*"
 cxx-compiler = "*"
@@ -25,8 +24,6 @@ plan = { cmd = "planner/build/gcopter_planner planner/config/course_v3.yaml --ou
 planner-web = { cmd = "python planner/web/server.py", depends-on = ["build"], description = "Web planner: upload CAD, place checkpoints, plan (http://127.0.0.1:8765)" }
 # 2. trajectory -> edit / hand to the drone
 editor = { cmd = "python -m webbrowser tools/path_editor.html", description = "Path editor: drag a planned path, export CSV" }
-# 3. fly
-demo = { cmd = "python tools/dashboard_demo.py", description = "Flight dashboard against a recorded state (http://127.0.0.1:8099/?k=demo)" }
 # checks
 test-planner = { cmd = "python planner/tests/run_tests.py planner/build", depends-on = ["build"], description = "Planner tests (upstream parity, checkpoints, map)" }
 test = { cmd = "cd flight/dash && python -m unittest test_autoflight_api_offline test_course_geometry test_course_replan test_course_state test_depth_cache test_depth_height test_ground_reference test_heading_control test_hop test_marks_dry test_pass_through test_path_heading test_path_import test_shadow_mode test_simple_launch test_state_wire test_stop_recovery test_yaw_tracker && cd ../depth_overlay && python -m unittest test_geometry", description = "Flight tests that need no ROS" }

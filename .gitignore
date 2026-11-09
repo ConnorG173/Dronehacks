@@ -14,3 +14,7 @@ localizer/log/
 .venv-planner/
 tools/course_*.json
 flight/dash/dash_token.txt
+
+# local dashboard demo (not part of the repository)
+tools/dashboard_demo.py
+tools/demo/
